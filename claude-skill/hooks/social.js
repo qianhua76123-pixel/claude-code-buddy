@@ -2,22 +2,23 @@
 /**
  * AI Pet - Social Layer (GitHub-Powered)
  *
- * Uses GitHub Gists for pet cards & friend lists,
- * GitHub Issues for battles. Zero server, zero cost.
+ * Friend codes for easy social: /pet card → get code → share → /pet friend ABC-1234
+ * No GitHub token needed for basic friend features (read-only public data).
+ * Token only needed for: publishing cards, creating battles.
  *
  * Usage:
- *   node social.js card-publish          Publish/update your pet card (public Gist)
- *   node social.js card-view <user>      View someone's pet card
- *   node social.js friend-add <user>     Add friend by GitHub username
+ *   node social.js card-publish          Publish/update pet card → get friend code
+ *   node social.js card-view <code>      View pet card by friend code
+ *   node social.js friend-add <code>     Add friend by code (e.g. PXL-7A3F)
  *   node social.js friend-list           List friends and their pets
- *   node social.js friend-remove <user>  Remove friend
- *   node social.js battle-create <user>  Challenge a friend
+ *   node social.js friend-remove <code>  Remove friend
+ *   node social.js battle-create <code>  Challenge by friend code
  *   node social.js battle-check          Check pending challenges
  *   node social.js battle-accept <id>    Accept a challenge
  *   node social.js battle-result <id>    View battle result
  *   node social.js rank                  Friend leaderboard
  *
- * Requires: GitHub token in env GITHUB_TOKEN or ~/.claude/settings.json
+ * Requires: GitHub token for write ops (card-publish, battle-create)
  */
 
 const https = require("https");
@@ -29,7 +30,12 @@ const CLAUDE_DIR = path.join(os.homedir(), ".claude");
 const STATE_FILE = path.join(CLAUDE_DIR, "ai-pet-state.json");
 const FRIENDS_FILE = path.join(CLAUDE_DIR, "ai-pet-friends.json");
 const CARD_ID_FILE = path.join(CLAUDE_DIR, "ai-pet-card-gist-id");
-const BATTLE_REPO = "qianhua76123-pixel/claude-code-buddy"; // Issues go here
+const BATTLE_REPO = "qianhua76123-pixel/claude-code-buddy";
+
+// ── Public Registry Gist ──
+// One shared Gist that maps friend codes → card Gist IDs
+// This is owned by the project maintainer and is world-readable
+const REGISTRY_GIST_ID = ""; // Will be created on first card-publish if empty
 
 // ── GitHub Token ──
 function getToken() {
@@ -100,6 +106,101 @@ function saveCardGistId(id) {
   fs.writeFileSync(CARD_ID_FILE, id);
 }
 
+// ── Friend Code ──
+// Format: 3-letter species prefix + "-" + 4-char hex from username hash
+// Example: PXL-7A3F, CAT-B2E1, DRG-9F0C
+
+function generateFriendCode(username, species) {
+  // Species prefix (3 chars)
+  const prefixMap = {
+    cat: "CAT", dog: "DOG", cactus: "PXL", dragon: "DRG", blob: "BLB",
+    bunny: "BNY", owl: "OWL", penguin: "PNG", turtle: "TRT", octopus: "OCT",
+    rabbit: "RBT", axolotl: "AXL", capybara: "CPY", ghost: "GHO",
+    robot: "BOT", mushroom: "MSH", snail: "SNL", goose: "GOS", chonk: "CHK",
+  };
+  const prefix = prefixMap[species] || "PET";
+
+  // Hash username → 4 hex chars
+  let hash = 0;
+  for (let i = 0; i < username.length; i++) {
+    hash = ((hash << 5) - hash + username.charCodeAt(i)) | 0;
+  }
+  const hex = Math.abs(hash).toString(16).toUpperCase().slice(0, 4).padStart(4, "0");
+
+  return `${prefix}-${hex}`;
+}
+
+function parseFriendCode(code) {
+  // Accept formats: PXL-7A3F, pxl-7a3f, PXL7A3F, @username
+  code = code.trim().toUpperCase();
+  if (code.startsWith("@")) return { type: "username", value: code.slice(1) };
+  code = code.replace(/[^A-Z0-9-]/g, "");
+  if (code.length === 7 && code[3] === "-") return { type: "code", value: code };
+  if (code.length === 7) return { type: "code", value: code.slice(0, 3) + "-" + code.slice(3) };
+  return { type: "unknown", value: code };
+}
+
+// ── Registry (public Gist: maps friend codes to card Gist IDs) ──
+const REGISTRY_FILE = path.join(CLAUDE_DIR, "ai-pet-registry-gist-id");
+
+function getRegistryGistId() {
+  // Check local cache first
+  try { return fs.readFileSync(REGISTRY_FILE, "utf8").trim(); }
+  catch { return null; }
+}
+
+function saveRegistryGistId(id) {
+  fs.writeFileSync(REGISTRY_FILE, id);
+}
+
+async function loadRegistry() {
+  let regId = getRegistryGistId();
+
+  if (!regId) {
+    // Search for existing registry gist by description
+    const res = await ghApi("GET", `/gists?per_page=100`);
+    if (res.status === 200) {
+      const found = res.data.find(g => g.description?.includes("ai-pet-registry"));
+      if (found) {
+        regId = found.id;
+        saveRegistryGistId(regId);
+      }
+    }
+  }
+
+  if (regId) {
+    const res = await ghApi("GET", `/gists/${regId}`);
+    if (res.status === 200 && res.data.files?.["registry.json"]) {
+      try { return { id: regId, data: JSON.parse(res.data.files["registry.json"].content) }; }
+      catch { return { id: regId, data: { players: {} } }; }
+    }
+  }
+
+  return { id: null, data: { players: {} } };
+}
+
+async function saveRegistry(regId, registryData) {
+  const content = JSON.stringify(registryData, null, 2);
+
+  if (regId) {
+    await ghApi("PATCH", `/gists/${regId}`, {
+      files: { "registry.json": { content } },
+    });
+  } else {
+    // Create new registry gist
+    const res = await ghApi("POST", "/gists", {
+      description: "ai-pet-registry - Player friend code directory",
+      public: true,
+      files: { "registry.json": { content } },
+    });
+    if (res.status === 201) {
+      saveRegistryGistId(res.data.id);
+      return res.data.id;
+    }
+  }
+  return regId;
+}
+
 // ── Battle Stats Calculator ──
 function calcBattleStats(state) {
   const bs = state.buddyStats || { debugging: 30, patience: 30, chaos: 30, wisdom: 30, snark: 30 };
@@ -114,10 +215,12 @@ function calcBattleStats(state) {
   };
 }
 
-function buildCard(state) {
+function buildCard(state, username) {
+  const code = generateFriendCode(username || "unknown", state.buddySpecies || "cat");
   return {
     version: "1.0",
-    owner: null, // filled after API call
+    owner: username || null,
+    friendCode: code,
     pet: {
       name: state.buddyName,
       species: state.buddySpecies,
@@ -192,81 +295,142 @@ async function cardPublish() {
   const state = loadState();
   if (!state) { console.log('{"error": "No pet state. Run /pet first."}'); return; }
 
-  // Get own username
   const me = await ghApi("GET", "/user");
   if (me.status !== 200) { console.log('{"error": "GitHub auth failed. Set GITHUB_TOKEN."}'); return; }
 
-  const card = buildCard(state);
-  card.owner = me.data.login;
-
+  const card = buildCard(state, me.data.login);
+  const friendCode = card.friendCode;
   const content = JSON.stringify(card, null, 2);
   const existingId = getCardGistId();
 
+  let gistId, gistUrl;
+
   if (existingId) {
-    // Update existing gist
     const res = await ghApi("PATCH", `/gists/${existingId}`, {
       files: { "ai-pet-card.json": { content } },
     });
-    if (res.status === 200) {
-      console.log(JSON.stringify({ ok: true, action: "updated", gistId: existingId, url: res.data.html_url }));
-    } else {
-      console.log(JSON.stringify({ error: "Failed to update gist", status: res.status }));
-    }
+    gistId = existingId;
+    gistUrl = res.data?.html_url;
   } else {
-    // Create new gist
     const res = await ghApi("POST", "/gists", {
-      description: `AI Pet Card - ${card.pet.name} the ${card.pet.species}`,
+      description: `AI Pet Card - ${card.pet.name} the ${card.pet.species} [${friendCode}]`,
       public: true,
       files: { "ai-pet-card.json": { content } },
     });
     if (res.status === 201) {
-      saveCardGistId(res.data.id);
-      console.log(JSON.stringify({ ok: true, action: "created", gistId: res.data.id, url: res.data.html_url }));
+      gistId = res.data.id;
+      gistUrl = res.data.html_url;
+      saveCardGistId(gistId);
     } else {
       console.log(JSON.stringify({ error: "Failed to create gist", status: res.status }));
+      return;
     }
   }
+
+  // Register friend code in public registry
+  const reg = await loadRegistry();
+  reg.data.players = reg.data.players || {};
+  reg.data.players[friendCode] = {
+    github: me.data.login,
+    gistId,
+    pet: card.pet.name,
+    species: card.pet.species,
+    level: card.pet.level,
+    updatedAt: new Date().toISOString(),
+  };
+  await saveRegistry(reg.id, reg.data);
+
+  console.log(JSON.stringify({
+    ok: true,
+    friendCode,
+    gistId,
+    url: gistUrl,
+    shareText: `Add me on AI Pet! My code: ${friendCode}  →  /pet friend ${friendCode}`,
+  }));
 }
 
-async function cardView(username) {
-  // Search for user's public gist named "ai-pet-card.json"
-  const res = await ghApi("GET", `/users/${username}/gists?per_page=100`);
-  if (res.status !== 200) { console.log(JSON.stringify({ error: "User not found", username })); return; }
+async function cardView(codeOrUser) {
+  const parsed = parseFriendCode(codeOrUser);
+  let gistId;
 
-  const gist = res.data.find((g) => g.files && g.files["ai-pet-card.json"]);
-  if (!gist) { console.log(JSON.stringify({ error: "No pet card found", username })); return; }
+  if (parsed.type === "code") {
+    // Look up in registry
+    const reg = await loadRegistry();
+    const player = reg.data.players?.[parsed.value];
+    if (!player) { console.log(JSON.stringify({ error: "Friend code not found", code: parsed.value })); return; }
+    gistId = player.gistId;
+  } else {
+    // Username lookup - search their gists
+    const res = await ghApi("GET", `/users/${parsed.value}/gists?per_page=100`);
+    if (res.status !== 200) { console.log(JSON.stringify({ error: "User not found" })); return; }
+    const gist = res.data.find((g) => g.files?.["ai-pet-card.json"]);
+    if (!gist) { console.log(JSON.stringify({ error: "No pet card found" })); return; }
+    gistId = gist.id;
+  }
 
-  // Fetch full gist content
-  const full = await ghApi("GET", `/gists/${gist.id}`);
+  const full = await ghApi("GET", `/gists/${gistId}`);
   try {
     const card = JSON.parse(full.data.files["ai-pet-card.json"].content);
-    console.log(JSON.stringify({ ok: true, gistId: gist.id, card }));
+    console.log(JSON.stringify({ ok: true, gistId, card }));
   } catch {
     console.log(JSON.stringify({ error: "Failed to parse pet card" }));
   }
 }
 
-async function friendAdd(username) {
-  // First, find their pet card
-  const res = await ghApi("GET", `/users/${username}/gists?per_page=100`);
-  if (res.status !== 200) { console.log(JSON.stringify({ error: "User not found" })); return; }
+async function friendAdd(codeOrUser) {
+  const parsed = parseFriendCode(codeOrUser);
+  let github, gistId, friendCode;
 
-  const gist = res.data.find((g) => g.files?.["ai-pet-card.json"]);
-  if (!gist) { console.log(JSON.stringify({ error: "User has no pet card. They need to run /pet card first." })); return; }
+  if (parsed.type === "code") {
+    // Look up friend code in registry
+    const reg = await loadRegistry();
+    const player = reg.data.players?.[parsed.value];
+    if (!player) {
+      console.log(JSON.stringify({ error: "Friend code not found. Ask them to run /pet card first.", code: parsed.value }));
+      return;
+    }
+    github = player.github;
+    gistId = player.gistId;
+    friendCode = parsed.value;
+  } else {
+    // Username: search their gists
+    github = parsed.value;
+    const res = await ghApi("GET", `/users/${github}/gists?per_page=100`);
+    if (res.status !== 200) { console.log(JSON.stringify({ error: "User not found" })); return; }
+    const gist = res.data.find((g) => g.files?.["ai-pet-card.json"]);
+    if (!gist) { console.log(JSON.stringify({ error: "No pet card. They need /pet card first." })); return; }
+    gistId = gist.id;
+    friendCode = codeOrUser;
+  }
 
   const friends = loadFriends();
-  if (friends.friends.find((f) => f.github === username)) {
-    console.log(JSON.stringify({ error: "Already friends", username }));
+  if (friends.friends.find((f) => f.github === github)) {
+    console.log(JSON.stringify({ error: "Already friends", github }));
     return;
   }
 
+  // Fetch card for display
+  let cardPreview = null;
+  try {
+    const full = await ghApi("GET", `/gists/${gistId}`);
+    if (full.status === 200) cardPreview = JSON.parse(full.data.files["ai-pet-card.json"].content);
+  } catch {}
+
   friends.friends.push({
-    github: username,
-    gistId: gist.id,
+    github,
+    gistId,
+    friendCode,
     addedAt: new Date().toISOString(),
   });
   saveFriends(friends);
-  console.log(JSON.stringify({ ok: true, added: username, gistId: gist.id }));
+
+  console.log(JSON.stringify({
+    ok: true,
+    added: github,
+    friendCode,
+    pet: cardPreview?.pet || null,
+    battleStats: cardPreview?.battleStats || null,
+  }));
 }
 
 async function friendList() {
