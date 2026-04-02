@@ -302,6 +302,18 @@ Display equipment, consumables, gold balance.
 ### `/pet memories` - Notable moments log
 ### `/pet mood` - Current mood & Claude influence
 
+### `/pet update` - Check for updates and auto-update
+Run the update checker:
+```bash
+node /path/to/claude-code-buddy/claude-skill/hooks/update-check.js update
+```
+This will: git pull latest → reinstall skills → show changelog.
+If update is available, show the new version and what changed.
+If already up to date, say so.
+
+### `/pet version` - Show current version
+Read `version.json` from project root and display.
+
 ## STATE SCHEMA
 
 ```json

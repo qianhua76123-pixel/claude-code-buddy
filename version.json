@@ -1,0 +1,7 @@
+{
+  "version": "2.1.0",
+  "channel": "stable",
+  "minClaudeCode": "2.1.0",
+  "releaseDate": "2026-04-02",
+  "changelog": "Core/hardware separation, deep gameplay, autonomous tasks, OpenClaw integration"
+}

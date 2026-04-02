@@ -23,6 +23,7 @@ const CLAUDE_DIR = path.join(os.homedir(), ".claude");
 const STATE_FILE = path.join(CLAUDE_DIR, "ai-pet-state.json");
 const STATS_FILE = path.join(CLAUDE_DIR, "stats-cache.json");
 const BUDDY_DIR = path.join(CLAUDE_DIR, "pets");
+const UPDATE_CACHE = path.join(CLAUDE_DIR, "ai-pet-update-cache.json");
 
 // ─── State Management ───
 
@@ -189,8 +190,15 @@ function statusline() {
 
   const msgs = today ? `\u{1F4AC}${today.messageCount}` : "";
 
+  // Check for update badge
+  let updateBadge = "";
+  try {
+    const cache = JSON.parse(fs.readFileSync(UPDATE_CACHE, "utf8"));
+    if (cache.updateAvailable) updateBadge = " \u2B06\uFE0F";
+  } catch {}
+
   process.stdout.write(
-    `${species}${buddy} ${name} Lv.${lv} ${moodE} \u2764${h} \u{1F356}${f} \u26A1${e}${streakStr} ${msgs}${hw}`
+    `${species}${buddy} ${name} Lv.${lv} ${moodE} \u2764${h} \u{1F356}${f} \u26A1${e}${streakStr} ${msgs}${hw}${updateBadge}`
   );
 }
 
@@ -310,6 +318,17 @@ function onSession() {
 
   state.personality.mood = calculateMood(state);
   saveState(state);
+
+  // Background update check (async, non-blocking)
+  const updateScript = path.join(__dirname, "update-check.js");
+  if (fs.existsSync(updateScript)) {
+    try {
+      require("child_process").exec(
+        `node "${updateScript}" check`,
+        { timeout: 8000 }
+      );
+    } catch {}
+  }
 }
 
 // ─── Mode: Sync Buddy ───
