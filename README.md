@@ -16,20 +16,18 @@ AI Pet bridges **virtual** and **physical** by connecting Claude Code's Buddy pe
 ```
 ┌─ Claude Code Terminal ───────────────┐
 │                                      │
-│  /pet       - Nurture your pet       │    ┌─ ESP32 Hardware ──────┐
-│  /pet-pixel - Generate pixel art     │    │                      │
-│  /pet-sync  - Sync to hardware  ─────┼───>│  LCD: Pet animation  │
-│                                      │    │  Speaker: TTS voice  │
-│  StatusLine: live pet status bar     │    │  Mic: Voice input    │
-│  Hooks: coding activity → pet stats  │    │                      │
+│  /pet         - Nurture your pet     │    ┌─ ESP32 Hardware ──────┐
+│  /pet quest   - Daily quests         │    │  LCD: Pet animation  │
+│  /pet adventure - Dungeon crawl      │    │  Speaker: TTS voice  │
+│  /pet-pixel   - Pixel art           │    │  Mic: Voice input    │
+│  /pet-sync    - Sync to hardware ───┼───>│  (optional, opt-in)  │
 │                                      │    └──────────────────────┘
-│  Buddy Integration:                  │           ▲
-│  Species, name, rarity, core stats   │           │ WebSocket
-│  all sync from /buddy ←→ /pet       │           │
-│                                      │    ┌──────┴───────────────┐
-│  Real Activity Tracking:             │    │  MCP Bridge Server   │
-│  stats-cache.json → pet growth       │    │  (Node.js, port 8765)│
-└──────────────────────────────────────┘    └──────────────────────┘
+│  /pet card    - Publish profile  ────┼───>┌─ GitHub (free) ──────┐
+│  /pet friend  - Add friends      ────┼───>│  Gist: Pet cards     │
+│  /pet battle  - PvP combat!      ────┼───>│  Issues: Battles     │
+│  /pet rank    - Leaderboard      ────┼───>│  Zero-cost backend   │
+│                                      │    └──────────────────────┘
+└──────────────────────────────────────┘
 ```
 
 ## How It Works: The Integration Loop
@@ -101,6 +99,27 @@ Claude: /pet-sync speak "Hello!"
     → WebSocket sends to ESP32
       → ESP32 plays TTS audio + shows happy face on LCD
 ```
+
+### 5. Social & Battle (Multiplayer Layer)
+
+Fight friends, climb leaderboards — all powered by GitHub (zero server cost).
+
+```
+/pet card              → Publish your pet as a public GitHub Gist
+/pet friend add @alice → Add friend (they need a card too)
+/pet battle @alice     → Challenge! Auto-simulates, posts result to GitHub Issue
+/pet rank              → See who's on top
+```
+
+**Battle stats** are derived from your Buddy:
+```
+ATK = (DEBUGGING + SNARK) / 10     ← high SNARK = high damage
+DEF = (PATIENCE + WISDOM) / 10
+SPD = CHAOS / 5                    ← determines who strikes first
+HP  = level × 3 + bond / 2
+```
+
+First-time setup: `/pet card` will guide you through creating a GitHub token (2 minutes, one-time).
 
 ## Local Files & Data Flow
 

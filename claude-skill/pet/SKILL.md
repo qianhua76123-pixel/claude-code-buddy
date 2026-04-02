@@ -304,8 +304,55 @@ Display equipment, consumables, gold balance.
 
 ## SOCIAL & BATTLE SYSTEM (GitHub-Powered)
 
-All social features use `social.js` which talks to GitHub API. Requires GITHUB_TOKEN env var.
+All social features use `social.js` which talks to GitHub API.
 The script path: `claude-skill/hooks/social.js` (relative to project root).
+
+### First-Time Social Setup (Run this when user first uses any social command)
+
+When user runs `/pet card`, `/pet friend`, or `/pet battle` for the first time, check if GITHUB_TOKEN is set. If not, guide them through setup:
+
+```
+ ╭─ Social Features Setup ─────────────────────────╮
+ │                                                  │
+ │  Social features need a GitHub token.            │
+ │  One-time setup, takes 2 minutes:                │
+ │                                                  │
+ │  1. Open: github.com/settings/tokens?type=beta   │
+ │  2. Click "Generate new token"                   │
+ │  3. Name: "ai-pet"                               │
+ │  4. Permissions needed:                           │
+ │     ✅ Gists → Read and Write                    │
+ │     ✅ Issues → Read and Write                   │
+ │     (under "Repository permissions")             │
+ │  5. Click "Generate token"                       │
+ │  6. Copy the token, then tell me                 │
+ │                                                  │
+ │  I'll save it to your settings automatically.    │
+ ╰──────────────────────────────────────────────────╯
+```
+
+After user provides the token, save it to `~/.claude/settings.json` under `env.GITHUB_TOKEN`. Then auto-run `/pet card` to publish their first card.
+
+After card is published, show:
+
+```
+ ╭─ You're Online! ────────────────────────────────╮
+ │                                                  │
+ │  🎉 Pet card published!                          │
+ │  URL: https://gist.github.com/xxx/yyy            │
+ │                                                  │
+ │  Share this with friends so they can add you:    │
+ │  /pet friend add @your-username                  │
+ │                                                  │
+ │  ── What you can do now ──                       │
+ │  /pet card           View your card              │
+ │  /pet card @user     View friend's pet           │
+ │  /pet friend add @x  Add friend                  │
+ │  /pet friend list    See all friends              │
+ │  /pet battle @user   Challenge to battle!        │
+ │  /pet rank           Leaderboard                 │
+ ╰──────────────────────────────────────────────────╯
+```
 
 ### Battle Stats (derived from Buddy Stats)
 ```
