@@ -1,118 +1,69 @@
 #!/bin/bash
-# AI Pet - One-click installer for Claude Code
-# Usage: git clone https://github.com/qianhua76123-pixel/claude-code-buddy.git && cd claude-code-buddy && bash install.sh
+# AI Pet - Core Plugin Installer (software only, zero dependencies)
+#
+# Usage:
+#   git clone https://github.com/qianhua76123-pixel/claude-code-buddy.git
+#   cd claude-code-buddy
+#   bash install.sh
+#
+# This installs ONLY the core plugin (Skills + Hooks + StatusLine).
+# For hardware/OpenClaw, run: bash hardware/setup.sh
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CLAUDE_DIR="$HOME/.claude"
 SKILLS_DIR="$CLAUDE_DIR/skills"
-SETTINGS_FILE="$CLAUDE_DIR/settings.json"
 HOOK_SCRIPT="$SCRIPT_DIR/claude-skill/hooks/pet-hook.js"
 
-echo "=== AI Pet Installer ==="
+echo ""
+echo "  ╭──────────────────────────────╮"
+echo "  │  AI Pet - Plugin Installer   │"
+echo "  │  Software only, 0 deps       │"
+echo "  ╰──────────────────────────────╯"
 echo ""
 
-# 1. Check Claude Code exists
+# Check Claude Code
 if [ ! -d "$CLAUDE_DIR" ]; then
-  echo "Error: ~/.claude/ not found. Is Claude Code installed?"
+  echo "  ~/.claude/ not found. Install Claude Code first."
   exit 1
 fi
 
-# 2. Create skills directory if needed
 mkdir -p "$SKILLS_DIR"
 
-# 3. Copy skills (symlink so updates from git pull auto-apply)
-echo "[1/3] Installing skills..."
+# ── Install Skills ──
+
+echo "  Installing skills..."
+
 for skill in pet pet-pixel pet-sync; do
   rm -rf "$SKILLS_DIR/$skill"
-  if command -v mklink &>/dev/null || [ "$(uname -o 2>/dev/null)" = "Msys" ] || [ "$(uname -o 2>/dev/null)" = "Cygwin" ]; then
-    # Windows: copy instead of symlink (symlinks need admin)
-    cp -r "$SCRIPT_DIR/claude-skill/$skill" "$SKILLS_DIR/$skill"
-  else
-    # macOS/Linux: symlink
-    ln -sf "$SCRIPT_DIR/claude-skill/$skill" "$SKILLS_DIR/$skill"
-  fi
-  echo "  + /$(cat "$SKILLS_DIR/$skill/SKILL.md" | grep "^name:" | head -1 | sed 's/name: *//' | tr -d '"')"
+  cp -r "$SCRIPT_DIR/claude-skill/$skill" "$SKILLS_DIR/$skill"
+  echo "    + /$skill"
 done
 
-# 4. Configure settings.json
-echo "[2/3] Configuring hooks & statusline..."
+# ── Configure Settings ──
 
-# Escape path for JSON (handle backslashes on Windows)
-HOOK_PATH=$(echo "$HOOK_SCRIPT" | sed 's/\\/\\\\/g')
+echo "  Configuring hooks..."
 
-if [ ! -f "$SETTINGS_FILE" ]; then
-  # No settings file - create one
-  cat > "$SETTINGS_FILE" << SETTINGS_EOF
-{
-  "statusLine": {
-    "type": "command",
-    "command": "node \"$HOOK_PATH\" statusline"
-  },
-  "hooks": {
-    "SessionStart": [{
-      "matcher": "",
-      "hooks": [{
-        "type": "command",
-        "command": "node \"$HOOK_PATH\" on-session"
-      }]
-    }],
-    "PostToolUse": [{
-      "matcher": "Write|Edit",
-      "hooks": [{
-        "type": "command",
-        "command": "node \"$HOOK_PATH\" on-code"
-      }]
-    }]
-  }
-}
-SETTINGS_EOF
-  echo "  Created $SETTINGS_FILE"
+# Use the Node.js installer for safe merge (handles existing settings)
+if command -v node &>/dev/null; then
+  node "$SCRIPT_DIR/install-settings.js" 2>/dev/null
 else
-  # Settings file exists - check if already configured
-  if grep -q "ai-pet" "$SETTINGS_FILE" 2>/dev/null || grep -q "pet-hook" "$SETTINGS_FILE" 2>/dev/null; then
-    echo "  Settings already configured, skipping."
-  else
-    echo ""
-    echo "  Your settings.json already exists. Please add manually:"
-    echo ""
-    echo "  Add to \"statusLine\":"
-    echo "    { \"type\": \"command\", \"command\": \"node \\\"$HOOK_PATH\\\" statusline\" }"
-    echo ""
-    echo "  Add to \"hooks.SessionStart\":"
-    echo "    [{ \"matcher\": \"\", \"hooks\": [{ \"type\": \"command\", \"command\": \"node \\\"$HOOK_PATH\\\" on-session\" }] }]"
-    echo ""
-    echo "  Add to \"hooks.PostToolUse\":"
-    echo "    [{ \"matcher\": \"Write|Edit\", \"hooks\": [{ \"type\": \"command\", \"command\": \"node \\\"$HOOK_PATH\\\" on-code\" }] }]"
-    echo ""
-    echo "  Or run: node install-settings.js"
-  fi
-fi
-
-# 5. Install MCP Bridge dependencies (optional)
-echo "[3/3] MCP Bridge setup..."
-if command -v npm &>/dev/null; then
-  if [ -f "$SCRIPT_DIR/mcp-bridge/package.json" ]; then
-    cd "$SCRIPT_DIR/mcp-bridge" && npm install --silent 2>/dev/null && cd "$SCRIPT_DIR"
-    echo "  MCP Bridge dependencies installed."
-    echo "  To start: cd mcp-bridge && npm start"
-  fi
-else
-  echo "  npm not found, skipping MCP Bridge. Install Node.js to use hardware features."
+  echo "    Node.js not found. Run 'node install-settings.js' manually."
 fi
 
 echo ""
-echo "=== Installation Complete ==="
-echo ""
-echo "Next steps:"
-echo "  1. Restart Claude Code"
-echo "  2. Type /pet to hatch your first pet!"
-echo "  3. Type /pet-pixel to generate pixel art"
-echo ""
-echo "Optional hardware:"
-echo "  - Buy ESP32-S3 with LCD (~130 RMB on Taobao)"
-echo "  - Flash firmware: cd esp32-firmware && pio run -t upload"
-echo "  - Start bridge: cd mcp-bridge && npm start"
-echo "  - In Claude Code: /pet-sync connect"
+echo "  ╭──────────────────────────────────╮"
+echo "  │  Done! Restart Claude Code.      │"
+echo "  │                                  │"
+echo "  │  /pet         Hatch your pet     │"
+echo "  │  /pet feed    Feed it            │"
+echo "  │  /pet play    Play with it       │"
+echo "  │  /pet quest   Daily quests       │"
+echo "  │  /pet adventure  Dungeon crawl   │"
+echo "  │  /pet-pixel   Pixel art pattern  │"
+echo "  │                                  │"
+echo "  │  Hardware & OpenClaw (optional): │"
+echo "  │  bash hardware/setup.sh          │"
+echo "  ╰──────────────────────────────────╯"
 echo ""

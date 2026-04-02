@@ -169,9 +169,9 @@ Claude: /pet-sync speak "Hello!"
 }
 ```
 
-## Quick Start
+## Install
 
-### One-Click Install (Recommended)
+### Core Plugin (30 seconds, zero dependencies)
 
 ```bash
 git clone https://github.com/qianhua76123-pixel/claude-code-buddy.git
@@ -179,39 +179,26 @@ cd claude-code-buddy
 bash install.sh
 ```
 
-The installer will:
-- Copy `/pet`, `/pet-pixel`, `/pet-sync` skills to `~/.claude/skills/`
-- Configure StatusLine and Hooks in `settings.json`
-- Install MCP Bridge dependencies (if npm available)
+Installs 3 Skills + StatusLine + Hooks. No npm, no Node modules, nothing extra. Restart Claude Code, then:
 
-### Manual Install
+```
+/pet              # Hatch your pet
+/pet quest        # Daily quests
+/pet adventure    # Dungeon crawl
+/pet-pixel        # Pixel art pattern
+```
 
-If the auto-installer doesn't work for your setup:
+### Hardware & OpenClaw (optional, when you're ready)
 
 ```bash
-# 1. Copy skills
-cp -r claude-skill/pet ~/.claude/skills/
-cp -r claude-skill/pet-pixel ~/.claude/skills/
-cp -r claude-skill/pet-sync ~/.claude/skills/
+# Full hardware setup (MCP Bridge + OpenClaw + ESP32)
+bash hardware/setup.sh
 
-# 2. Auto-configure settings.json (safe merge, creates backup)
-node install-settings.js
-
-# Or manually add to ~/.claude/settings.json - see install-settings.js for the exact config
+# Or just connect OpenClaw (one command)
+node hardware/connect-openclaw.js
 ```
 
-### After Install
-
-Restart Claude Code, then:
-
-```
-/pet              # Hatch your pet!
-/pet feed         # Feed it
-/pet play         # Play (references your real coding activity)
-/pet talk         # Chat with it (personality based on Buddy stats)
-/pet-pixel        # Generate pixel art pattern
-/pet-pixel grid   # Crafting grid for cross-stitch/perler beads
-```
+Hardware lives in `hardware/` and is **never touched by the core installer**. You opt-in when you have the device or want OpenClaw integration.
 
 ### Hardware Setup (adds physical pet, ~130 RMB)
 
@@ -267,21 +254,31 @@ The hooks read real data from `stats-cache.json` - your pet's growth is driven e
 ## Project Structure
 
 ```
-ai-pet/
-├── claude-skill/              # Claude Code integration
-│   ├── pet/SKILL.md           # /pet - nurturing + Buddy sync
-│   ├── pet-pixel/SKILL.md     # /pet-pixel - pixel art generator
-│   ├── pet-sync/SKILL.md      # /pet-sync - hardware bridge
-│   └── hooks/pet-hook.js      # StatusLine + activity hooks
-├── mcp-bridge/                # Hardware bridge
-│   ├── package.json
-│   └── server.js              # MCP Server + WebSocket
-├── esp32-firmware/            # Physical pet
-│   ├── platformio.ini
-│   └── src/
-│       ├── main.cpp           # Display, WiFi, WebSocket, TTS
-│       └── pixel_arts.h       # Pixel art frame data
-└── README.md
+claude-code-buddy/
+│
+├── install.sh                  # Core installer (skills + hooks only)
+├── install-settings.js         # Safe settings.json merger
+│
+├── claude-skill/               # ══ Core Plugin (always installed) ══
+│   ├── pet/SKILL.md            #   /pet - quests, adventures, skill trees
+│   ├── pet-pixel/SKILL.md      #   /pet-pixel - pixel art generator
+│   ├── pet-sync/SKILL.md       #   /pet-sync - hardware sync commands
+│   └── hooks/pet-hook.js       #   StatusLine + coding activity hooks
+│
+└── hardware/                   # ══ Hardware Extension (opt-in) ══
+    ├── setup.sh                #   One-command hardware setup
+    ├── connect-openclaw.js     #   Zero-config OpenClaw connector
+    ├── README.md               #   Hardware shopping list & guide
+    ├── mcp-bridge/             #   MCP Bridge + Task Engine
+    │   ├── package.json
+    │   └── server.js           #   MCP Server + WebSocket + Cron
+    ├── esp32-firmware/         #   ESP32 device firmware
+    │   ├── platformio.ini
+    │   └── src/
+    │       ├── main.cpp        #   Display + WiFi + TTS + Animations
+    │       └── pixel_arts.h    #   Pixel art frame data
+    └── docs/
+        └── openclaw-setup.md   #   Detailed OpenClaw guide
 ```
 
 ## Tech Stack

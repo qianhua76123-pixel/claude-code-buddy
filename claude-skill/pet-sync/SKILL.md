@@ -1,21 +1,52 @@
 ---
 name: pet-sync
-description: "Sync AI pet to ESP32 hardware, manage autonomous tasks (cron/one-time/counter), and let the pet do things independently after conversation ends. Also supports OpenClaw integration."
+description: "Sync AI pet to ESP32 hardware, manage autonomous tasks, one-command OpenClaw connection. Hardware features are in the hardware/ folder and NOT installed by default."
 user-invocable: true
 ---
 
-# Pet Hardware Sync & Autonomous Task Manager
+# Pet Sync - Hardware & Autonomous Tasks
+
+Hardware features live in `hardware/` and are NOT installed with the core plugin. Users opt-in when ready.
 
 ## Commands
 
-### `/pet-sync` - Check sync status
-Show hardware connection and active task count.
+### `/pet-sync` - Check status
+Read `~/.claude/ai-pet-state.json` for `hardwareSynced`. Show:
+- If hardware NOT set up: show quick setup instructions
+- If hardware connected: show connection status via `pet_status` MCP tool
+
+### `/pet-sync setup` - One-command hardware setup
+Run the setup script:
+```bash
+bash /path/to/claude-code-buddy/hardware/setup.sh
+```
+This installs MCP Bridge dependencies, configures the MCP server in settings.json, and optionally connects OpenClaw.
+
+### `/pet-sync openclaw` - One-command OpenClaw connection
+
+**This is the zero-friction path.** Run:
+```bash
+node /path/to/claude-code-buddy/hardware/connect-openclaw.js
+```
+
+The script automatically:
+1. Checks if OpenClaw is installed (if not: shows `npm install -g openclaw@latest`)
+2. Installs MCP Bridge dependencies if needed
+3. Registers `ai-pet` as an OpenClaw MCP server
+4. Verifies the connection
+
+After this, users can talk to their pet through OpenClaw:
+```
+OpenClaw> 让宠物每小时提醒我喝水
+OpenClaw> 设置明早9点叫我起床
+OpenClaw> 让宠物说"你好世界"
+```
 
 ### `/pet-sync connect` - Connect to hardware
-Call `pet_status` MCP tool. If connected, push state with `pet_push_state`.
+Calls `pet_status` MCP tool. If connected, pushes state with `pet_push_state`.
 
 ### `/pet-sync speak [text]` - Make pet speak
-Call `pet_speak` MCP tool. If no text, generate one based on pet personality.
+Calls `pet_speak` MCP tool. If no text, generate one based on pet personality + SNARK level.
 
 ### `/pet-sync emotion [type]` - Set display emotion
 Types: happy, sad, angry, sleepy, excited, love, confused, sick, neutral
@@ -24,125 +55,49 @@ Types: happy, sad, angry, sleepy, excited, love, confused, sick, neutral
 
 ## Autonomous Tasks
 
-### `/pet-sync task add [description]` - Add autonomous task from natural language
+### `/pet-sync task add [natural language]` - Add task
 
-Parse user's natural language into a structured task. Examples:
+Parse natural language into a structured task. Be smart about parsing:
 
-User: "每小时提醒我喝水"
-→ Call `pet_add_task` with:
-  - id: "drink_water"
-  - type: "cron"
-  - cron: "0 * * * *"
-  - action: "speak"
-  - payload: "该喝水啦~ 休息一下眼睛吧！"
+| User says | Parsed as |
+|-----------|-----------|
+| "每小时提醒喝水" | cron: "0 * * * *", speak: "该喝水啦~" |
+| "每半小时提醒一次" | cron: "*/30 * * * *" |
+| "每天早上8点报天气" | cron: "0 8 * * *", action: weather |
+| "明早9点叫我" | once: tomorrow 09:00 |
+| "30分钟后提醒" | once: now + 30min |
+| "每写50行代码休息" | counter: 50, event: code_write |
+| "每天晚上11点说晚安" | cron: "0 23 * * *", speak: "晚安~" |
+| "工作日早上9点提醒开会" | cron: "0 9 * * 1-5" |
 
-User: "明早9点叫我起床"
-→ Call `pet_add_task` with:
-  - id: "morning_alarm"
-  - type: "once"
-  - fireAt: "2026-04-03T09:00:00"
-  - action: "speak"
-  - payload: "早上好！新的一天开始啦！"
+Call `pet_add_task` MCP tool with parsed parameters.
 
-User: "每写50行代码提醒我休息"
-→ Call `pet_add_task` with:
-  - id: "code_break"
-  - type: "counter"
-  - threshold: 50
-  - triggerEvent: "code_write"
-  - action: "speak"
-  - payload: "写了50行了，站起来活动活动！"
+### `/pet-sync task list` - Show all tasks
+Call `pet_list_tasks`, format as table.
 
-User: "每天早上播放开心动画"
-→ Call `pet_add_task` with:
-  - id: "morning_dance"
-  - type: "cron"
-  - cron: "0 8 * * *"
-  - action: "animate"
-  - payload: "dance"
+### `/pet-sync task remove [id]` - Remove task
+### `/pet-sync task clear` - Clear done tasks
 
-### `/pet-sync task list` - List all tasks
-Call `pet_list_tasks`, display in formatted table:
+## Hardware Not Installed Message
+
+When hardware features are needed but not set up, show:
 
 ```
- ── Autonomous Tasks ─────────────────────────────────
- [ACTIVE] drink_water (cron: every hour)
-          → speak: "该喝水啦~"
+Hardware extension not installed yet.
 
- [ACTIVE] morning_alarm (once: 2026-04-03 09:00)
-          → speak: "早上好！"
+Quick setup (2 minutes):
+  bash hardware/setup.sh
 
- [ACTIVE] code_break (counter: 12/50 code_write)
-          → speak: "写了50行了，休息一下！"
+Or just OpenClaw:
+  node hardware/connect-openclaw.js
 
- [DONE]   test_task (once: 2026-04-02 15:00)
-          → speak: "测试完成"
- ─────────────────────────────────────────────────────
- Total: 4 tasks (3 active, 1 done)
+Hardware is optional - the core pet game
+works perfectly without it!
 ```
 
-### `/pet-sync task remove [id]` - Remove a task
-Call `pet_remove_task` with the task ID.
-
-### `/pet-sync task clear` - Clear completed tasks
-Call `pet_clear_done`.
-
-### `/pet-sync disconnect` - Disconnect
-
-## OpenClaw Integration
-
-### How to connect via OpenClaw
-
-If the user has OpenClaw installed, they can add our MCP Bridge as an OpenClaw MCP server:
-
-**Option 1: OpenClaw config file**
-```json
-{
-  "mcpServers": {
-    "ai-pet": {
-      "command": "node",
-      "args": ["/path/to/ai-pet/mcp-bridge/server.js"]
-    }
-  }
-}
-```
-
-**Option 2: OpenClaw CLI**
-```bash
-openclaw mcp add ai-pet -- node /path/to/ai-pet/mcp-bridge/server.js
-```
-
-Once connected, OpenClaw can use all pet tools (speak, emotion, animate, add_task, etc.) just like Claude Code does. The autonomous task engine runs in the MCP Bridge process - it works regardless of whether Claude Code or OpenClaw initiated the tasks.
-
-### `/pet-sync openclaw` - Show OpenClaw setup instructions
-
-## Task Flow Architecture
-
-```
-User says: "每半小时提醒我喝水，睡前说晚安"
-    │
-    ▼
-Claude/OpenClaw parses into 2 tasks:
-    ├─ pet_add_task(id:"drink", type:"cron", cron:"*/30 * * * *", action:"speak", payload:"喝水~")
-    └─ pet_add_task(id:"goodnight", type:"cron", cron:"0 23 * * *", action:"speak", payload:"晚安~")
-    │
-    ▼
-MCP Bridge stores tasks in ~/.claude/ai-pet-tasks.json
-MCP Bridge pushes task queue to ESP32 via WebSocket
-    │
-    ▼
-ESP32 runs independently:
-    ├─ 30s tick loop checks cron schedule
-    ├─ Due task → play TTS / show emotion / animate
-    └─ Reports completion back to Bridge
-    │
-    ▼
-User is NOT in Claude Code / OpenClaw
-Pet is doing its own thing autonomously!
-```
-
-## Important
-- Natural language → structured task parsing is the KEY feature. Don't ask users to write cron expressions - parse them yourself.
-- Always confirm the parsed task before creating it.
-- Show a summary of what was created after adding tasks.
-- MCP tools used: pet_add_task, pet_list_tasks, pet_remove_task, pet_clear_done, pet_increment_counter
+## Important Rules
+1. Never assume hardware is available - always check first
+2. Natural language → task parsing is the key UX feature
+3. Don't expose cron syntax to users - parse it for them
+4. Show clear feedback after every task operation
+5. hardware/ folder stuff is OPT-IN only
