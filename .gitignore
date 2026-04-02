@@ -1,0 +1,15 @@
+node_modules/
+.pio/
+.vscode/
+*.db
+*.sqlite
+.DS_Store
+Thumbs.db
+
+# ESP32 build artifacts
+esp32-firmware/.pio/
+esp32-firmware/lib/
+esp32-firmware/include/
+
+# Local pet state (user-specific)
+ai-pet-state.json
