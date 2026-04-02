@@ -6,7 +6,7 @@
 #   cd claude-code-buddy
 #   bash install.sh
 #
-# This installs ONLY the core plugin (Skills + Hooks + StatusLine).
+# Also works as updater: re-run to get latest version.
 # For hardware/OpenClaw, run: bash hardware/setup.sh
 
 set -e
@@ -14,7 +14,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CLAUDE_DIR="$HOME/.claude"
 SKILLS_DIR="$CLAUDE_DIR/skills"
-HOOK_SCRIPT="$SCRIPT_DIR/claude-skill/hooks/pet-hook.js"
+HOOKS_DIR="$CLAUDE_DIR/hooks"
 
 echo ""
 echo "  ╭──────────────────────────────╮"
@@ -29,11 +29,11 @@ if [ ! -d "$CLAUDE_DIR" ]; then
   exit 1
 fi
 
-mkdir -p "$SKILLS_DIR"
+mkdir -p "$SKILLS_DIR" "$HOOKS_DIR"
 
-# ── Install Skills ──
+# ── Install Skills (SKILL.md files) ──
 
-echo "  Installing skills..."
+echo "  [1/3] Installing skills..."
 
 for skill in pet pet-pixel pet-sync; do
   rm -rf "$SKILLS_DIR/$skill"
@@ -41,29 +41,52 @@ for skill in pet pet-pixel pet-sync; do
   echo "    + /$skill"
 done
 
+# ── Install Hook Scripts (the actual logic files) ──
+
+echo "  [2/3] Installing hook scripts..."
+
+for script in pet-hook.js social.js home.js update-check.js; do
+  SRC="$SCRIPT_DIR/claude-skill/hooks/$script"
+  if [ -f "$SRC" ]; then
+    cp "$SRC" "$HOOKS_DIR/$script"
+    echo "    + $script"
+  fi
+done
+
 # ── Configure Settings ──
 
-echo "  Configuring hooks..."
+echo "  [3/3] Configuring hooks & statusline..."
 
-# Use the Node.js installer for safe merge (handles existing settings)
+HOOK_DIR="$HOOKS_DIR"
+
 if command -v node &>/dev/null; then
-  node "$SCRIPT_DIR/install-settings.js" 2>/dev/null
+  node "$SCRIPT_DIR/install-settings.js" 2>/dev/null || true
 else
   echo "    Node.js not found. Run 'node install-settings.js' manually."
+fi
+
+# ── Version stamp ──
+if [ -f "$SCRIPT_DIR/version.json" ]; then
+  cp "$SCRIPT_DIR/version.json" "$CLAUDE_DIR/ai-pet-version.json"
 fi
 
 echo ""
 echo "  ╭──────────────────────────────────╮"
 echo "  │  Done! Restart Claude Code.      │"
 echo "  │                                  │"
-echo "  │  /pet         Hatch your pet     │"
-echo "  │  /pet feed    Feed it            │"
-echo "  │  /pet play    Play with it       │"
-echo "  │  /pet quest   Daily quests       │"
+echo "  │  /pet            Hatch your pet  │"
+echo "  │  /pet quest      Daily quests    │"
 echo "  │  /pet adventure  Dungeon crawl   │"
-echo "  │  /pet-pixel   Pixel art pattern  │"
+echo "  │  /pet home       Build your home │"
+echo "  │  /pet card       Get friend code │"
+echo "  │  /pet battle X   Fight friends!  │"
+echo "  │  /pet visit X    Visit homes!    │"
+echo "  │  /pet-pixel      Pixel art       │"
 echo "  │                                  │"
-echo "  │  Hardware & OpenClaw (optional): │"
+echo "  │  No GitHub token needed.         │"
+echo "  │  Social features work instantly. │"
+echo "  │                                  │"
+echo "  │  Hardware (optional):            │"
 echo "  │  bash hardware/setup.sh          │"
 echo "  ╰──────────────────────────────────╯"
 echo ""

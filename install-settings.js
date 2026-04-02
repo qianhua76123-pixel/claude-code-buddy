@@ -2,6 +2,7 @@
 /**
  * AI Pet - Settings.json auto-configurator
  * Safely merges pet hooks and statusline into existing settings.json
+ * Points hooks to ~/.claude/hooks/ (where install.sh copies them)
  *
  * Usage: node install-settings.js
  */
@@ -10,117 +11,103 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 
-const SETTINGS_FILE = path.join(os.homedir(), ".claude", "settings.json");
-const HOOK_SCRIPT = path.join(__dirname, "claude-skill", "hooks", "pet-hook.js");
+const CLAUDE_DIR = path.join(os.homedir(), ".claude");
+const SETTINGS_FILE = path.join(CLAUDE_DIR, "settings.json");
 
-// Normalize path for JSON (forward slashes work everywhere)
-const hookPath = HOOK_SCRIPT.replace(/\\/g, "/");
+// Hooks live in ~/.claude/hooks/ after install (portable, not tied to project dir)
+const HOOKS_DIR = path.join(CLAUDE_DIR, "hooks");
+const hookPath = path.join(HOOKS_DIR, "pet-hook.js").replace(/\\/g, "/");
 
 function main() {
   let settings = {};
 
-  // Read existing settings
   if (fs.existsSync(SETTINGS_FILE)) {
     try {
       settings = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8"));
     } catch (e) {
-      console.error("Error parsing settings.json:", e.message);
-      console.error("Please fix the JSON syntax first.");
+      console.error("    Error parsing settings.json:", e.message);
       process.exit(1);
     }
-  }
-
-  // Check if already installed
-  const raw = JSON.stringify(settings);
-  if (raw.includes("pet-hook") || raw.includes("ai-pet")) {
-    console.log("AI Pet is already configured in settings.json");
-    return;
   }
 
   // Backup
   if (fs.existsSync(SETTINGS_FILE)) {
     const backup = SETTINGS_FILE + ".backup-" + Date.now();
     fs.copyFileSync(SETTINGS_FILE, backup);
-    console.log("Backup saved:", backup);
   }
 
-  // Add statusLine
-  if (!settings.statusLine) {
+  let changed = false;
+
+  // Always update hook paths (in case they moved)
+  // Remove old project-dir hooks and replace with ~/.claude/hooks/ paths
+  const oldRaw = JSON.stringify(settings);
+
+  // StatusLine
+  if (!settings.statusLine || !oldRaw.includes("pet-hook")) {
     settings.statusLine = {
       type: "command",
       command: `node "${hookPath}" statusline`,
     };
-    console.log("+ Added statusLine");
-  } else {
-    console.log("~ statusLine already exists, skipping (add manually if needed)");
+    changed = true;
+    console.log("    + statusLine → " + hookPath);
   }
 
-  // Add hooks
+  // Hooks
   if (!settings.hooks) settings.hooks = {};
 
-  // SessionStart hook
+  // SessionStart
+  const sessionCmd = `node "${hookPath}" on-session`;
   if (!settings.hooks.SessionStart) {
-    settings.hooks.SessionStart = [
-      {
-        matcher: "",
-        hooks: [
-          {
-            type: "command",
-            command: `node "${hookPath}" on-session`,
-          },
-        ],
-      },
-    ];
-    console.log("+ Added SessionStart hook");
+    settings.hooks.SessionStart = [{ matcher: "", hooks: [{ type: "command", command: sessionCmd }] }];
+    changed = true;
+    console.log("    + SessionStart hook");
   } else {
-    // Append to existing
-    const exists = settings.hooks.SessionStart.some((h) =>
-      JSON.stringify(h).includes("pet-hook")
-    );
-    if (!exists) {
-      settings.hooks.SessionStart.push({
-        matcher: "",
-        hooks: [
-          { type: "command", command: `node "${hookPath}" on-session` },
-        ],
-      });
-      console.log("+ Appended to existing SessionStart hooks");
+    // Update existing pet-hook entries to new path
+    let found = false;
+    for (const entry of settings.hooks.SessionStart) {
+      for (const h of (entry.hooks || [])) {
+        if (h.command?.includes("pet-hook")) { h.command = sessionCmd; found = true; }
+      }
+    }
+    if (!found) {
+      settings.hooks.SessionStart.push({ matcher: "", hooks: [{ type: "command", command: sessionCmd }] });
+      changed = true;
+      console.log("    + SessionStart hook (appended)");
+    } else if (found) {
+      changed = true;
+      console.log("    ~ SessionStart hook path updated");
     }
   }
 
-  // PostToolUse hook
+  // PostToolUse
+  const codeCmd = `node "${hookPath}" on-code`;
   if (!settings.hooks.PostToolUse) {
-    settings.hooks.PostToolUse = [
-      {
-        matcher: "Write|Edit",
-        hooks: [
-          {
-            type: "command",
-            command: `node "${hookPath}" on-code`,
-          },
-        ],
-      },
-    ];
-    console.log("+ Added PostToolUse hook");
+    settings.hooks.PostToolUse = [{ matcher: "Write|Edit", hooks: [{ type: "command", command: codeCmd }] }];
+    changed = true;
+    console.log("    + PostToolUse hook");
   } else {
-    const exists = settings.hooks.PostToolUse.some((h) =>
-      JSON.stringify(h).includes("pet-hook")
-    );
-    if (!exists) {
-      settings.hooks.PostToolUse.push({
-        matcher: "Write|Edit",
-        hooks: [
-          { type: "command", command: `node "${hookPath}" on-code` },
-        ],
-      });
-      console.log("+ Appended to existing PostToolUse hooks");
+    let found = false;
+    for (const entry of settings.hooks.PostToolUse) {
+      for (const h of (entry.hooks || [])) {
+        if (h.command?.includes("pet-hook")) { h.command = codeCmd; found = true; }
+      }
+    }
+    if (!found) {
+      settings.hooks.PostToolUse.push({ matcher: "Write|Edit", hooks: [{ type: "command", command: codeCmd }] });
+      changed = true;
+      console.log("    + PostToolUse hook (appended)");
+    } else if (found) {
+      changed = true;
+      console.log("    ~ PostToolUse hook path updated");
     }
   }
 
-  // Write settings
-  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
-  console.log("\nSettings saved to:", SETTINGS_FILE);
-  console.log("Restart Claude Code to activate AI Pet!");
+  if (changed) {
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
+    console.log("    Settings saved.");
+  } else {
+    console.log("    Settings already up to date.");
+  }
 }
 
 main();
