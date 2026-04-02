@@ -8,23 +8,31 @@ user-invocable: true
 
 You are running a full-featured electronic pet game integrated with Claude Code Buddy and real coding activity.
 
-## SCRIPT LOCATIONS (CRITICAL)
+## FIND SCRIPTS FIRST (CRITICAL - do this ONCE per session)
 
-All backend scripts live in `~/.claude/hooks/`. Use these exact paths when running commands:
+Scripts may be in `~/.claude/hooks/` (new) or `~/.claude/` (old install).
+**At the start of any /pet command, run this to find them:**
 
+```bash
+for f in social.js home.js pet-hook.js; do
+  if [ -f "$HOME/.claude/hooks/$f" ]; then echo "FOUND: ~/.claude/hooks/$f"
+  elif [ -f "$HOME/.claude/$f" ]; then echo "FOUND: ~/.claude/$f"
+  else echo "MISSING: $f"; fi
+done
 ```
-SOCIAL_JS = ~/.claude/hooks/social.js     ← Friends, battles, cards, leaderboard
-HOME_JS   = ~/.claude/hooks/home.js       ← Home, garden, furniture, visits
-HOOK_JS   = ~/.claude/hooks/pet-hook.js   ← StatusLine, activity tracking
-```
 
-When running scripts, use: `node ~/.claude/hooks/social.js <command>`
-NOT: `node ~/.claude/hooks/social.js` (wrong directory, will fail)
+Use whichever path each script was FOUND at. Cache the results for the session.
 
-If a script is missing, tell the user:
+If a script says MISSING, tell the user:
 ```
-Script not found. Please update:
+[script] is not installed. To fix:
   cd claude-code-buddy && git pull && bash install.sh
+```
+
+If the user doesn't have the repo cloned, tell them:
+```
+git clone https://github.com/qianhua76123-pixel/claude-code-buddy.git
+cd claude-code-buddy && bash install.sh
 ```
 
 ## READ DATA FIRST (Every Interaction)
@@ -314,7 +322,8 @@ Display equipment, consumables, gold balance.
 
 ## HOME & VISIT SYSTEM
 
-Home system uses `claude-skill/hooks/home.js`.
+Use the home.js path found in the "FIND SCRIPTS FIRST" step above (e.g. `node ~/.claude/hooks/home.js` or `node ~/.claude/home.js`).
+If home.js is MISSING, tell user to update: `cd claude-code-buddy && git pull && bash install.sh`
 
 ### `/pet home` - View your home
 Run `node ~/.claude/hooks/home.js status`. Shows all rooms, garden status, passive income, visitor count.
@@ -381,10 +390,10 @@ Run `node ~/.claude/hooks/home.js guestbook`. Shows last 10 visitor actions.
 ### `/pet memories` - Notable moments log
 ### `/pet mood` - Current mood & Claude influence
 
-## SOCIAL & BATTLE SYSTEM (GitHub-Powered)
+## SOCIAL & BATTLE SYSTEM (Zero Auth, jsonblob.com)
 
-All social features use `social.js` which talks to GitHub API.
-The script path: `claude-skill/hooks/social.js` (relative to project root).
+Use the social.js path found in the "FIND SCRIPTS FIRST" step above.
+No GitHub token needed. No signup. All social features use jsonblob.com (free public JSON storage).
 
 ### Zero Setup! No token, no signup, just play.
 
