@@ -171,49 +171,40 @@ Claude: /pet-sync speak "Hello!"
 
 ## Quick Start
 
-### Software Only (5 minutes)
+### One-Click Install (Recommended)
 
 ```bash
-# 1. Clone the repo
-git clone https://github.com/YOUR_USERNAME/ai-pet.git
-
-# 2. Copy skills to Claude Code
-cp -r ai-pet/claude-skill/pet ~/.claude/skills/
-cp -r ai-pet/claude-skill/pet-pixel ~/.claude/skills/
-cp -r ai-pet/claude-skill/pet-sync ~/.claude/skills/
-
-# 3. Add to ~/.claude/settings.json
+git clone https://github.com/qianhua76123-pixel/claude-code-buddy.git
+cd claude-code-buddy
+bash install.sh
 ```
 
-Add these to your `settings.json`:
+The installer will:
+- Copy `/pet`, `/pet-pixel`, `/pet-sync` skills to `~/.claude/skills/`
+- Configure StatusLine and Hooks in `settings.json`
+- Install MCP Bridge dependencies (if npm available)
 
-```json
-{
-  "statusLine": {
-    "type": "command",
-    "command": "node /path/to/ai-pet/claude-skill/hooks/pet-hook.js statusline"
-  },
-  "hooks": {
-    "SessionStart": [{
-      "matcher": "",
-      "hooks": [{
-        "type": "command",
-        "command": "node /path/to/ai-pet/claude-skill/hooks/pet-hook.js on-session"
-      }]
-    }],
-    "PostToolUse": [{
-      "matcher": "Write|Edit",
-      "hooks": [{
-        "type": "command",
-        "command": "node /path/to/ai-pet/claude-skill/hooks/pet-hook.js on-code"
-      }]
-    }]
-  }
-}
-```
+### Manual Install
+
+If the auto-installer doesn't work for your setup:
 
 ```bash
-# 4. Restart Claude Code, then:
+# 1. Copy skills
+cp -r claude-skill/pet ~/.claude/skills/
+cp -r claude-skill/pet-pixel ~/.claude/skills/
+cp -r claude-skill/pet-sync ~/.claude/skills/
+
+# 2. Auto-configure settings.json (safe merge, creates backup)
+node install-settings.js
+
+# Or manually add to ~/.claude/settings.json - see install-settings.js for the exact config
+```
+
+### After Install
+
+Restart Claude Code, then:
+
+```
 /pet              # Hatch your pet!
 /pet feed         # Feed it
 /pet play         # Play (references your real coding activity)
