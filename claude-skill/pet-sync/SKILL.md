@@ -1,93 +1,148 @@
 ---
 name: pet-sync
-description: "Sync your AI pet to ESP32 hardware via MCP Bridge. Connects Claude Code pet to physical device for display, TTS voice, and real-time interaction."
+description: "Sync AI pet to ESP32 hardware, manage autonomous tasks (cron/one-time/counter), and let the pet do things independently after conversation ends. Also supports OpenClaw integration."
 user-invocable: true
 ---
 
-# Pet Hardware Sync
-
-Sync the AI pet from Claude Code to a physical ESP32 device via the MCP Bridge Server.
-
-## Prerequisites
-
-The MCP Bridge Server must be running and configured in Claude Code's MCP settings. The ESP32 device must be connected to the same network and running the ai-pet firmware.
+# Pet Hardware Sync & Autonomous Task Manager
 
 ## Commands
 
-### `/pet-sync` (no args) - Check sync status
-Show whether the MCP Bridge is connected and the ESP32 device status.
+### `/pet-sync` - Check sync status
+Show hardware connection and active task count.
 
 ### `/pet-sync connect` - Connect to hardware
-1. Check if MCP Bridge server is configured
-2. Call `pet_status` MCP tool to verify connection
-3. Push current pet state to hardware
-4. Confirm sync is active
+Call `pet_status` MCP tool. If connected, push state with `pet_push_state`.
 
-### `/pet-sync speak [text]` - Make pet speak on hardware
-1. Read pet state for personality context
-2. If no text provided, generate a contextual greeting based on pet personality
-3. Call `pet_speak` MCP tool with the text
-4. ESP32 will play TTS audio of the text
+### `/pet-sync speak [text]` - Make pet speak
+Call `pet_speak` MCP tool. If no text, generate one based on pet personality.
 
-### `/pet-sync emotion [type]` - Set pet emotion on hardware display
-Types: happy, sad, angry, sleepy, excited, love, confused, sick
-1. Call `pet_emotion` MCP tool
-2. ESP32 updates LCD display to show corresponding pixel animation
+### `/pet-sync emotion [type]` - Set display emotion
+Types: happy, sad, angry, sleepy, excited, love, confused, sick, neutral
 
 ### `/pet-sync push` - Push full state to hardware
-Send complete pet state (stats, appearance, evolution) to ESP32 for display.
 
-### `/pet-sync disconnect` - Disconnect from hardware
-Cleanly disconnect from the ESP32 device.
+## Autonomous Tasks
 
-## MCP Tools Used
+### `/pet-sync task add [description]` - Add autonomous task from natural language
 
-This skill uses the following MCP tools from the `ai-pet-bridge` server:
+Parse user's natural language into a structured task. Examples:
 
-- `pet_status()` - Get hardware device status
-- `pet_speak(text: string)` - Play TTS on ESP32 speaker
-- `pet_emotion(emotion: string)` - Update pet display emotion
-- `pet_push_state(state: object)` - Push full pet state to hardware
-- `pet_animate(animation: string)` - Trigger animation on LCD
-- `pet_listen()` - Start listening on ESP32 microphone, returns transcribed text
+User: "每小时提醒我喝水"
+→ Call `pet_add_task` with:
+  - id: "drink_water"
+  - type: "cron"
+  - cron: "0 * * * *"
+  - action: "speak"
+  - payload: "该喝水啦~ 休息一下眼睛吧！"
 
-## Interaction Flow
+User: "明早9点叫我起床"
+→ Call `pet_add_task` with:
+  - id: "morning_alarm"
+  - type: "once"
+  - fireAt: "2026-04-03T09:00:00"
+  - action: "speak"
+  - payload: "早上好！新的一天开始啦！"
 
-When the user wants to talk to their pet through hardware:
+User: "每写50行代码提醒我休息"
+→ Call `pet_add_task` with:
+  - id: "code_break"
+  - type: "counter"
+  - threshold: 50
+  - triggerEvent: "code_write"
+  - action: "speak"
+  - payload: "写了50行了，站起来活动活动！"
 
-1. User: `/pet-sync speak hello little friend`
-2. Skill reads pet state, applies personality
-3. Calls `pet_speak` with the text
-4. ESP32 plays the TTS audio
-5. Optionally calls `pet_emotion("happy")` to update display
-6. Updates pet state (happiness +5 for interaction)
-7. Saves state
+User: "每天早上播放开心动画"
+→ Call `pet_add_task` with:
+  - id: "morning_dance"
+  - type: "cron"
+  - cron: "0 8 * * *"
+  - action: "animate"
+  - payload: "dance"
 
-## Error Handling
-
-- If MCP Bridge not configured: show setup instructions
-- If ESP32 not connected: show troubleshooting steps (check WiFi, check firmware)
-- If command fails: retry once, then show error with diagnostics
-
-## Setup Instructions (shown when not configured)
+### `/pet-sync task list` - List all tasks
+Call `pet_list_tasks`, display in formatted table:
 
 ```
-To connect your pet to ESP32 hardware:
+ ── Autonomous Tasks ─────────────────────────────────
+ [ACTIVE] drink_water (cron: every hour)
+          → speak: "该喝水啦~"
 
-1. Start the MCP Bridge Server:
-   cd ai-pet/mcp-bridge && npm start
+ [ACTIVE] morning_alarm (once: 2026-04-03 09:00)
+          → speak: "早上好！"
 
-2. Add to your Claude Code MCP config (~/.claude/settings.json):
-   {
-     "mcpServers": {
-       "ai-pet-bridge": {
-         "command": "node",
-         "args": ["path/to/ai-pet/mcp-bridge/server.js"]
-       }
-     }
-   }
+ [ACTIVE] code_break (counter: 12/50 code_write)
+          → speak: "写了50行了，休息一下！"
 
-3. Make sure your ESP32 is powered on and connected to WiFi
-
-4. Run: /pet-sync connect
+ [DONE]   test_task (once: 2026-04-02 15:00)
+          → speak: "测试完成"
+ ─────────────────────────────────────────────────────
+ Total: 4 tasks (3 active, 1 done)
 ```
+
+### `/pet-sync task remove [id]` - Remove a task
+Call `pet_remove_task` with the task ID.
+
+### `/pet-sync task clear` - Clear completed tasks
+Call `pet_clear_done`.
+
+### `/pet-sync disconnect` - Disconnect
+
+## OpenClaw Integration
+
+### How to connect via OpenClaw
+
+If the user has OpenClaw installed, they can add our MCP Bridge as an OpenClaw MCP server:
+
+**Option 1: OpenClaw config file**
+```json
+{
+  "mcpServers": {
+    "ai-pet": {
+      "command": "node",
+      "args": ["/path/to/ai-pet/mcp-bridge/server.js"]
+    }
+  }
+}
+```
+
+**Option 2: OpenClaw CLI**
+```bash
+openclaw mcp add ai-pet -- node /path/to/ai-pet/mcp-bridge/server.js
+```
+
+Once connected, OpenClaw can use all pet tools (speak, emotion, animate, add_task, etc.) just like Claude Code does. The autonomous task engine runs in the MCP Bridge process - it works regardless of whether Claude Code or OpenClaw initiated the tasks.
+
+### `/pet-sync openclaw` - Show OpenClaw setup instructions
+
+## Task Flow Architecture
+
+```
+User says: "每半小时提醒我喝水，睡前说晚安"
+    │
+    ▼
+Claude/OpenClaw parses into 2 tasks:
+    ├─ pet_add_task(id:"drink", type:"cron", cron:"*/30 * * * *", action:"speak", payload:"喝水~")
+    └─ pet_add_task(id:"goodnight", type:"cron", cron:"0 23 * * *", action:"speak", payload:"晚安~")
+    │
+    ▼
+MCP Bridge stores tasks in ~/.claude/ai-pet-tasks.json
+MCP Bridge pushes task queue to ESP32 via WebSocket
+    │
+    ▼
+ESP32 runs independently:
+    ├─ 30s tick loop checks cron schedule
+    ├─ Due task → play TTS / show emotion / animate
+    └─ Reports completion back to Bridge
+    │
+    ▼
+User is NOT in Claude Code / OpenClaw
+Pet is doing its own thing autonomously!
+```
+
+## Important
+- Natural language → structured task parsing is the KEY feature. Don't ask users to write cron expressions - parse them yourself.
+- Always confirm the parsed task before creating it.
+- Show a summary of what was created after adding tasks.
+- MCP tools used: pet_add_task, pet_list_tasks, pet_remove_task, pet_clear_done, pet_increment_counter
