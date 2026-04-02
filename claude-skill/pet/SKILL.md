@@ -293,6 +293,66 @@ Display equipment, consumables, gold balance.
 
 ### `/pet skills` - Show skill tree with unlocks
 
+## HOME & VISIT SYSTEM
+
+Home system uses `claude-skill/hooks/home.js`.
+
+### `/pet home` - View your home
+Run `node home.js status`. Shows all rooms, garden status, passive income, visitor count.
+Display as ASCII room layout with furniture icons on a grid.
+
+### `/pet home build <room>` - Unlock new room
+Rooms: bedroom (200G), kitchen (350G), workshop (500G).
+Run `node home.js build <roomId>`.
+
+### `/pet home shop` - Browse furniture & seeds
+Run `node home.js shop`. Show two lists: furniture (with effects) and seeds (with grow times).
+
+### `/pet home buy <item>` - Purchase
+Run `node home.js buy <itemId>`. Deducts gold, adds to inventory.
+
+### `/pet home decorate` - Place furniture
+Ask user which item, which room, which position. Run `node home.js place <id> <room> <x> <y>`.
+Show the room grid BEFORE and AFTER placement.
+
+### `/pet home garden` - Garden overview + actions
+Run `node home.js status`, show garden plots with growth stages:
+```
+ 🫐·· 🌸·· 🍀·· ⬜··
+ 1/4   3/3!  2/5  empty
+```
+If any ready (!) → ask to harvest. If empty → ask to plant (show seed inventory).
+
+### `/pet home harvest` - Harvest ready plants
+Run `node home.js harvest`. Show what was collected.
+
+### `/pet home collect` - Collect passive income
+Run `node home.js collect`. Shows gold and XP earned since last collection.
+
+### `/pet visit <CODE>` - Visit friend's home!
+Run `node home.js visit <CODE>`. Show their home layout, garden, guestbook.
+Then show interaction options:
+```
+ What would you like to do?
+ [Water a plant 💧] [Feed their pet 🍖]
+ [Send a gift 🎁]   [Leave a note 📝]
+```
+
+### `/pet visit water <CODE> <plot>` - Water friend's plant
+Run `node home.js visit-water <CODE> <plotIdx>`. You get +5 XP, +3 Bond. Their plant grows 2x speed.
+
+### `/pet visit feed <CODE>` - Feed friend's pet
+Run `node home.js visit-feed <CODE>`. You get +3 XP, +2 Bond.
+
+### `/pet visit gift <CODE> <item>` - Send gift
+Run `node home.js visit-gift <CODE> <itemName>`. Item removed from your inventory, shows in their guestbook.
+
+### `/pet visit note <CODE> <message>` - Leave a note
+Run `node home.js visit-note <CODE> <message>`. You get +2 XP.
+
+### `/pet home guestbook` - See who visited
+Run `node home.js guestbook`. Shows last 10 visitor actions.
+
 ### `/pet feed` - Feed (costs 5 Gold or free consumable)
 ### `/pet play` - Play (+happiness, +bond, triggers CHAOS random event check)
 ### `/pet train [stat]` - Train specific Buddy stat (+2-3 to chosen stat, -20 energy)
