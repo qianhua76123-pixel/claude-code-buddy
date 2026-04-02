@@ -197,8 +197,12 @@ function statusline() {
     if (cache.updateAvailable) updateBadge = " \u2B06\uFE0F";
   } catch {}
 
+  // Friend code (if registered)
+  const friendCode = updated.friendCode || "";
+  const codeStr = friendCode ? ` [${friendCode}]` : "";
+
   process.stdout.write(
-    `${species}${buddy} ${name} Lv.${lv} ${moodE} \u2764${h} \u{1F356}${f} \u26A1${e}${streakStr} ${msgs}${hw}${updateBadge}`
+    `${species}${buddy} ${name} Lv.${lv} ${moodE} \u2764${h} \u{1F356}${f} \u26A1${e}${streakStr} ${msgs}${codeStr}${hw}${updateBadge}`
   );
 }
 
@@ -326,6 +330,17 @@ function onSession() {
       require("child_process").exec(
         `node "${updateScript}" check`,
         { timeout: 8000 }
+      );
+    } catch {}
+  }
+
+  // Background auto-register friend code (async, non-blocking)
+  const socialScript = path.join(__dirname, "social.js");
+  if (fs.existsSync(socialScript)) {
+    try {
+      require("child_process").exec(
+        `node "${socialScript}" auto-register`,
+        { timeout: 10000 }
       );
     } catch {}
   }

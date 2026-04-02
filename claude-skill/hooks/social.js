@@ -94,7 +94,7 @@ function saveMyCode(code) {
 
 // ── Friend Code Generator ──
 
-function genCode(name, species) {
+function genCode(name, species, salt = "") {
   const pre = {
     cat:"CAT",dog:"DOG",cactus:"PXL",dragon:"DRG",blob:"BLB",
     bunny:"BNY",owl:"OWL",penguin:"PNG",turtle:"TRT",octopus:"OCT",
@@ -102,10 +102,25 @@ function genCode(name, species) {
     robot:"BOT",mushroom:"MSH",snail:"SNL",goose:"GOS",chonk:"CHK",
   }[species] || "PET";
 
-  let h = 0;
-  const s = name + species + Date.now().toString(36);
-  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
-  return `${pre}-${Math.abs(h).toString(16).toUpperCase().slice(0,4).padStart(4,"0")}`;
+  // Deterministic hash from pet name + species (+ optional salt for collision)
+  // Same name+species always → same code (stable across sessions)
+  let h = 5381;
+  const s = name + ":" + species + salt;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) & 0xFFFFFFFF;
+  return `${pre}-${(h >>> 0).toString(16).toUpperCase().slice(0,4).padStart(4,"0")}`;
+}
+
+// Generate a stable unique code, checking registry for collisions
+async function genUniqueCode(name, species, registry) {
+  let code = genCode(name, species);
+  let salt = 0;
+  const existing = registry.players || {};
+  // If code taken by a DIFFERENT player, add salt until unique
+  while (existing[code] && existing[code].pet?.name !== name) {
+    salt++;
+    code = genCode(name, species, String(salt));
+  }
+  return code;
 }
 
 // ── Battle Stats ──
@@ -173,13 +188,11 @@ async function cmdCard() {
   if (!reg.players) reg.players = {};
 
   if (code && reg.players[code]) {
-    // Update existing
+    // Existing player → update card
     reg.players[code] = { ...card, code };
   } else {
-    // New player
-    code = genCode(state.buddyName || "pet", state.buddySpecies || "cat");
-    // Avoid collision
-    while (reg.players[code]) code = genCode(code + Math.random(), state.buddySpecies || "cat");
+    // New player → generate stable unique code
+    code = await genUniqueCode(state.buddyName || "pet", state.buddySpecies || "cat", reg);
     reg.players[code] = { ...card, code };
     saveMyCode(code);
   }
@@ -322,6 +335,46 @@ async function cmdRank() {
   out({ leaderboard: players, totalPlayers: reg.totalPlayers || players.length });
 }
 
+// ── Auto-register (called by SessionStart hook, silent) ──
+async function cmdAutoRegister() {
+  const state = loadState();
+  if (!state) return; // No pet yet, skip silently
+
+  const existingCode = getMyCode();
+
+  try {
+    const reg = (await blobGet(REGISTRY_BLOB)).data;
+    if (!reg.players) reg.players = {};
+
+    if (existingCode && reg.players[existingCode]) {
+      // Already registered → silent update card data
+      reg.players[existingCode] = { ...buildCard(state), code: existingCode };
+      reg.totalPlayers = Object.keys(reg.players).length;
+      await blobPut(REGISTRY_BLOB, reg);
+      // Write code to state for display
+      state.friendCode = existingCode;
+      fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+      return;
+    }
+
+    // Not registered yet → generate unique code
+    const code = await genUniqueCode(
+      state.buddyName || "pet",
+      state.buddySpecies || "cat",
+      reg
+    );
+    reg.players[code] = { ...buildCard(state), code };
+    reg.totalPlayers = Object.keys(reg.players).length;
+    await blobPut(REGISTRY_BLOB, reg);
+
+    saveMyCode(code);
+    state.friendCode = code;
+    fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+  } catch {
+    // Network error → skip silently, will retry next session
+  }
+}
+
 // ── Output ──
 function out(obj) { console.log(JSON.stringify(obj, null, 2)); }
 
@@ -329,6 +382,7 @@ function out(obj) { console.log(JSON.stringify(obj, null, 2)); }
 const [,, cmd, ...args] = process.argv;
 const cmds = {
   card: cmdCard,
+  "auto-register": cmdAutoRegister,
   view: () => cmdView(args[0]),
   friend: () => cmdFriend(args[0]),
   friends: cmdFriends,
