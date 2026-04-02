@@ -8,6 +8,25 @@ user-invocable: true
 
 You are running a full-featured electronic pet game integrated with Claude Code Buddy and real coding activity.
 
+## SCRIPT LOCATIONS (CRITICAL)
+
+All backend scripts live in `~/.claude/hooks/`. Use these exact paths when running commands:
+
+```
+SOCIAL_JS = ~/.claude/hooks/social.js     ← Friends, battles, cards, leaderboard
+HOME_JS   = ~/.claude/hooks/home.js       ← Home, garden, furniture, visits
+HOOK_JS   = ~/.claude/hooks/pet-hook.js   ← StatusLine, activity tracking
+```
+
+When running scripts, use: `node ~/.claude/hooks/social.js <command>`
+NOT: `node ~/.claude/hooks/social.js` (wrong directory, will fail)
+
+If a script is missing, tell the user:
+```
+Script not found. Please update:
+  cd claude-code-buddy && git pull && bash install.sh
+```
+
 ## READ DATA FIRST (Every Interaction)
 
 1. Read `~/.claude/pets/` - Buddy data (species, name, rarity, 5 core stats)
@@ -298,25 +317,25 @@ Display equipment, consumables, gold balance.
 Home system uses `claude-skill/hooks/home.js`.
 
 ### `/pet home` - View your home
-Run `node home.js status`. Shows all rooms, garden status, passive income, visitor count.
+Run `node ~/.claude/hooks/home.js status`. Shows all rooms, garden status, passive income, visitor count.
 Display as ASCII room layout with furniture icons on a grid.
 
 ### `/pet home build <room>` - Unlock new room
 Rooms: bedroom (200G), kitchen (350G), workshop (500G).
-Run `node home.js build <roomId>`.
+Run `node ~/.claude/hooks/home.js build <roomId>`.
 
 ### `/pet home shop` - Browse furniture & seeds
-Run `node home.js shop`. Show two lists: furniture (with effects) and seeds (with grow times).
+Run `node ~/.claude/hooks/home.js shop`. Show two lists: furniture (with effects) and seeds (with grow times).
 
 ### `/pet home buy <item>` - Purchase
-Run `node home.js buy <itemId>`. Deducts gold, adds to inventory.
+Run `node ~/.claude/hooks/home.js buy <itemId>`. Deducts gold, adds to inventory.
 
 ### `/pet home decorate` - Place furniture
-Ask user which item, which room, which position. Run `node home.js place <id> <room> <x> <y>`.
+Ask user which item, which room, which position. Run `node ~/.claude/hooks/home.js place <id> <room> <x> <y>`.
 Show the room grid BEFORE and AFTER placement.
 
 ### `/pet home garden` - Garden overview + actions
-Run `node home.js status`, show garden plots with growth stages:
+Run `node ~/.claude/hooks/home.js status`, show garden plots with growth stages:
 ```
  🫐·· 🌸·· 🍀·· ⬜··
  1/4   3/3!  2/5  empty
@@ -324,13 +343,13 @@ Run `node home.js status`, show garden plots with growth stages:
 If any ready (!) → ask to harvest. If empty → ask to plant (show seed inventory).
 
 ### `/pet home harvest` - Harvest ready plants
-Run `node home.js harvest`. Show what was collected.
+Run `node ~/.claude/hooks/home.js harvest`. Show what was collected.
 
 ### `/pet home collect` - Collect passive income
-Run `node home.js collect`. Shows gold and XP earned since last collection.
+Run `node ~/.claude/hooks/home.js collect`. Shows gold and XP earned since last collection.
 
 ### `/pet visit <CODE>` - Visit friend's home!
-Run `node home.js visit <CODE>`. Show their home layout, garden, guestbook.
+Run `node ~/.claude/hooks/home.js visit <CODE>`. Show their home layout, garden, guestbook.
 Then show interaction options:
 ```
  What would you like to do?
@@ -339,19 +358,19 @@ Then show interaction options:
 ```
 
 ### `/pet visit water <CODE> <plot>` - Water friend's plant
-Run `node home.js visit-water <CODE> <plotIdx>`. You get +5 XP, +3 Bond. Their plant grows 2x speed.
+Run `node ~/.claude/hooks/home.js visit-water <CODE> <plotIdx>`. You get +5 XP, +3 Bond. Their plant grows 2x speed.
 
 ### `/pet visit feed <CODE>` - Feed friend's pet
-Run `node home.js visit-feed <CODE>`. You get +3 XP, +2 Bond.
+Run `node ~/.claude/hooks/home.js visit-feed <CODE>`. You get +3 XP, +2 Bond.
 
 ### `/pet visit gift <CODE> <item>` - Send gift
-Run `node home.js visit-gift <CODE> <itemName>`. Item removed from your inventory, shows in their guestbook.
+Run `node ~/.claude/hooks/home.js visit-gift <CODE> <itemName>`. Item removed from your inventory, shows in their guestbook.
 
 ### `/pet visit note <CODE> <message>` - Leave a note
-Run `node home.js visit-note <CODE> <message>`. You get +2 XP.
+Run `node ~/.claude/hooks/home.js visit-note <CODE> <message>`. You get +2 XP.
 
 ### `/pet home guestbook` - See who visited
-Run `node home.js guestbook`. Shows last 10 visitor actions.
+Run `node ~/.claude/hooks/home.js guestbook`. Shows last 10 visitor actions.
 
 ### `/pet feed` - Feed (costs 5 Gold or free consumable)
 ### `/pet play` - Play (+happiness, +bond, triggers CHAOS random event check)
@@ -398,11 +417,11 @@ HP  = level * 3 + bond / 2          Hit points
 ```
 
 ### `/pet card` - Get your friend code
-Run `node social.js card`. Auto-registers in shared registry, returns friend code.
+Run `node ~/.claude/hooks/social.js card`. Auto-registers in shared registry, returns friend code.
 Show the code prominently + share text.
 
 ### `/pet card <CODE>` - View someone's pet
-Run `node social.js view <CODE>`. Display their pet info and battle stats:
+Run `node ~/.claude/hooks/social.js view <CODE>`. Display their pet info and battle stats:
 ```
  ── CAT-B2E1 ─────────────────────────────
  🐱 Whiskers (Lv.22 Cat) Uncommon
@@ -413,10 +432,10 @@ Run `node social.js view <CODE>`. Display their pet info and battle stats:
 ```
 
 ### `/pet friend <CODE>` - Add friend
-Run `node social.js friend <CODE>`. One command, done.
+Run `node ~/.claude/hooks/social.js friend <CODE>`. One command, done.
 
 ### `/pet friends` - Show all friends
-Run `node social.js friends`. Show each friend's live data from registry:
+Run `node ~/.claude/hooks/social.js friends`. Show each friend's live data from registry:
 ```
  ── Friends ──────────────────────────────
  CAT-B2E1  🐱 Whiskers  Lv.22  5W 2L
@@ -425,16 +444,16 @@ Run `node social.js friends`. Show each friend's live data from registry:
 ```
 
 ### `/pet battle <CODE>` - Instant battle!
-Run `node social.js battle <CODE>`. Auto-simulates immediately:
+Run `node ~/.claude/hooks/social.js battle <CODE>`. Auto-simulates immediately:
 - Shows stat comparison THEN battle log
 - Winner: +30 XP, +20 Gold. Loser: +10 XP, +5 Gold
 - Results saved to both players' records in shared registry
 
 ### `/pet battles` - Battle history
-Run `node social.js battles`. Last 10 battles.
+Run `node ~/.claude/hooks/social.js battles`. Last 10 battles.
 
 ### `/pet rank` - Global leaderboard
-Run `node social.js rank`. All registered players ranked by level + wins.
+Run `node ~/.claude/hooks/social.js rank`. All registered players ranked by level + wins.
 ```
  ── Leaderboard (42 players) ─────────────
  🥇 CAT-B2E1  Whiskers Lv.22  5W
