@@ -307,50 +307,25 @@ Display equipment, consumables, gold balance.
 All social features use `social.js` which talks to GitHub API.
 The script path: `claude-skill/hooks/social.js` (relative to project root).
 
-### First-Time Social Setup (Run this when user first uses any social command)
+### Zero Setup! No token, no signup, just play.
 
-When user runs `/pet card`, `/pet friend`, or `/pet battle` for the first time, check if GITHUB_TOKEN is set. If not, guide them through setup:
+Social uses a shared public registry (jsonblob.com). No GitHub token needed.
+The social.js script is at: `claude-skill/hooks/social.js`
 
-```
- ╭─ Social Features Setup ─────────────────────────╮
- │                                                  │
- │  Social features need a GitHub token.            │
- │  One-time setup, takes 2 minutes:                │
- │                                                  │
- │  1. Open: github.com/settings/tokens?type=beta   │
- │  2. Click "Generate new token"                   │
- │  3. Name: "ai-pet"                               │
- │  4. Permissions needed:                           │
- │     ✅ Gists → Read and Write                    │
- │     ✅ Issues → Read and Write                   │
- │     (under "Repository permissions")             │
- │  5. Click "Generate token"                       │
- │  6. Copy the token, then tell me                 │
- │                                                  │
- │  I'll save it to your settings automatically.    │
- ╰──────────────────────────────────────────────────╯
-```
-
-After user provides the token, save it to `~/.claude/settings.json` under `env.GITHUB_TOKEN`. Then auto-run `/pet card` to publish their first card.
-
-After card is published, show:
+When user runs `/pet card` for the first time, it auto-registers and gives them a code:
 
 ```
  ╭─ You're Online! ────────────────────────────────╮
  │                                                  │
- │  🎉 Pet card published!                          │
- │  URL: https://gist.github.com/xxx/yyy            │
+ │  🎉 Your friend code: PXL-7A3F                  │
  │                                                  │
- │  Share this with friends so they can add you:    │
- │  /pet friend add @your-username                  │
+ │  Share this with friends:                        │
+ │  "Add me on AI Pet! Code: PXL-7A3F"             │
+ │  → /pet friend PXL-7A3F                         │
  │                                                  │
- │  ── What you can do now ──                       │
- │  /pet card           View your card              │
- │  /pet card @user     View friend's pet           │
- │  /pet friend add @x  Add friend                  │
- │  /pet friend list    See all friends              │
- │  /pet battle @user   Challenge to battle!        │
- │  /pet rank           Leaderboard                 │
+ │  /pet friend <CODE>   Add friend                │
+ │  /pet battle <CODE>   Challenge to battle!      │
+ │  /pet rank            Leaderboard               │
  ╰──────────────────────────────────────────────────╯
 ```
 
@@ -362,60 +337,49 @@ SPD = CHAOS / 5                     Speed (determines first strike)
 HP  = level * 3 + bond / 2          Hit points
 ```
 
-### `/pet card` - Publish/view your pet card
-Run `node social.js card-publish` to create a public GitHub Gist with your pet's stats.
-This is your "profile" that other players can see. Show the Gist URL after publishing.
+### `/pet card` - Get your friend code
+Run `node social.js card`. Auto-registers in shared registry, returns friend code.
+Show the code prominently + share text.
 
-### `/pet card @username` - View someone's pet card
-Run `node social.js card-view <username>`. Display their pet info and battle stats.
+### `/pet card <CODE>` - View someone's pet
+Run `node social.js view <CODE>`. Display their pet info and battle stats:
+```
+ ── CAT-B2E1 ─────────────────────────────
+ 🐱 Whiskers (Lv.22 Cat) Uncommon
+ ATK:10  DEF:8  SPD:6  HP:81
+ Record: 5W 2L 0D
+ "Meow~ code more!"
+ ──────────────────────────────────────────
+```
 
-### `/pet friend add @username` - Add friend
-Run `node social.js friend-add <username>`. They need to have published a pet card first.
+### `/pet friend <CODE>` - Add friend
+Run `node social.js friend <CODE>`. One command, done.
 
-### `/pet friend list` - Show friends
-Run `node social.js friend-list`. Show each friend's pet name, level, species, and battle record.
-Format as a nice table:
+### `/pet friends` - Show all friends
+Run `node social.js friends`. Show each friend's live data from registry:
 ```
  ── Friends ──────────────────────────────
- @alice    🐱 Whiskers  Lv.22  W:5 L:2
- @bob      🐉 Draco     Lv.18  W:3 L:1
+ CAT-B2E1  🐱 Whiskers  Lv.22  5W 2L
+ DRG-9F0C  🐉 Draco     Lv.18  3W 1L
  ──────────────────────────────────────────
 ```
 
-### `/pet friend remove @username` - Remove friend
+### `/pet battle <CODE>` - Instant battle!
+Run `node social.js battle <CODE>`. Auto-simulates immediately:
+- Shows stat comparison THEN battle log
+- Winner: +30 XP, +20 Gold. Loser: +10 XP, +5 Gold
+- Results saved to both players' records in shared registry
 
-### `/pet battle` - Check pending challenges
-Run `node social.js battle-check`. Show any challenges waiting for you.
+### `/pet battles` - Battle history
+Run `node social.js battles`. Last 10 battles.
 
-### `/pet battle @username` - Challenge a friend
-Run `node social.js battle-create <username>`.
-Before creating: show both sides' stats comparison and ask for confirmation.
+### `/pet rank` - Global leaderboard
+Run `node social.js rank`. All registered players ranked by level + wins.
 ```
- ── Battle Preview ───────────────────────
- Your Pixel (Lv.15)    vs    Whiskers (Lv.22)
- ATK: 14               ATK: 10
- DEF: 4                DEF: 8
- SPD: 3                SPD: 6
- HP:  95               HP:  81
- ──────────────────────────────────────────
- Send challenge?
-```
-
-### `/pet battle accept [issue-number]` - Accept challenge
-Run `node social.js battle-accept <id>`. Battle auto-simulates, posts result to GitHub Issue.
-Show the battle log with round-by-round commentary. Update local XP and gold.
-Winner: +30 XP, +20 Gold. Loser: +10 XP, +5 Gold.
-
-### `/pet battle history` - View battle results
-Run `node social.js battle-result <id>` for specific battles.
-
-### `/pet battle rank` or `/pet rank` - Leaderboard
-Run `node social.js rank`. Show friends + self sorted by level and wins.
-```
- ── Leaderboard ──────────────────────────
- 🥇 @alice   Whiskers Lv.22  W:5 L:2
- 🥈 @me      Pixel    Lv.15  W:0 L:0
- 🥉 @bob     Draco    Lv.18  W:3 L:1
+ ── Leaderboard (42 players) ─────────────
+ 🥇 CAT-B2E1  Whiskers Lv.22  5W
+ 🥈 DRG-9F0C  Draco    Lv.18  3W
+ 🥉 PXL-7A3F  Pixel    Lv.15  0W
  ──────────────────────────────────────────
 ```
 

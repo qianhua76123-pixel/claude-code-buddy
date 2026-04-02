@@ -1,24 +1,19 @@
 #!/usr/bin/env node
 /**
- * AI Pet - Social Layer (GitHub-Powered)
+ * AI Pet Social - Zero Auth Multiplayer
  *
- * Friend codes for easy social: /pet card → get code → share → /pet friend ABC-1234
- * No GitHub token needed for basic friend features (read-only public data).
- * Token only needed for: publishing cards, creating battles.
+ * NO GitHub token, NO server, NO signup.
+ * Uses jsonblob.com (free) as shared player registry.
  *
  * Usage:
- *   node social.js card-publish          Publish/update pet card → get friend code
- *   node social.js card-view <code>      View pet card by friend code
- *   node social.js friend-add <code>     Add friend by code (e.g. PXL-7A3F)
- *   node social.js friend-list           List friends and their pets
- *   node social.js friend-remove <code>  Remove friend
- *   node social.js battle-create <code>  Challenge by friend code
- *   node social.js battle-check          Check pending challenges
- *   node social.js battle-accept <id>    Accept a challenge
- *   node social.js battle-result <id>    View battle result
- *   node social.js rank                  Friend leaderboard
- *
- * Requires: GitHub token for write ops (card-publish, battle-create)
+ *   node social.js card              Publish your pet card → get friend code
+ *   node social.js view <code>       View a pet by friend code
+ *   node social.js friend <code>     Add friend
+ *   node social.js friends           List all friends
+ *   node social.js unfriend <code>   Remove friend
+ *   node social.js battle <code>     Challenge a friend (async auto-battle)
+ *   node social.js battles           Check pending/recent battles
+ *   node social.js rank              Leaderboard
  */
 
 const https = require("https");
@@ -29,60 +24,51 @@ const os = require("os");
 const CLAUDE_DIR = path.join(os.homedir(), ".claude");
 const STATE_FILE = path.join(CLAUDE_DIR, "ai-pet-state.json");
 const FRIENDS_FILE = path.join(CLAUDE_DIR, "ai-pet-friends.json");
-const CARD_ID_FILE = path.join(CLAUDE_DIR, "ai-pet-card-gist-id");
-const BATTLE_REPO = "qianhua76123-pixel/claude-code-buddy";
+const MY_CODE_FILE = path.join(CLAUDE_DIR, "ai-pet-my-code");
 
-// ── Public Registry Gist ──
-// One shared Gist that maps friend codes → card Gist IDs
-// This is owned by the project maintainer and is world-readable
-const REGISTRY_GIST_ID = ""; // Will be created on first card-publish if empty
+// ── Shared Registry (jsonblob.com, zero auth) ──
+const REGISTRY_BLOB = "019d4f00-1cfd-7460-adfd-6a7d48aa445a";
+const BATTLES_BLOB_FILE = path.join(CLAUDE_DIR, "ai-pet-battles-blob-id");
 
-// ── GitHub Token ──
-function getToken() {
-  if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
-  try {
-    const settings = JSON.parse(fs.readFileSync(path.join(CLAUDE_DIR, "settings.json"), "utf8"));
-    // Try common env var locations in settings
-    return settings.env?.GITHUB_TOKEN || null;
-  } catch { return null; }
-}
+// ── HTTP helpers ──
 
-// ── HTTP Helper ──
-function ghApi(method, endpoint, body = null) {
+function httpReq(method, hostname, reqPath, body = null) {
   return new Promise((resolve, reject) => {
-    const token = getToken();
     const options = {
-      hostname: "api.github.com",
-      path: endpoint,
-      method,
+      hostname, path: reqPath, method,
       headers: {
-        "User-Agent": "ai-pet-buddy",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-        ...(token && { "Authorization": `Bearer ${token}` }),
+        "Accept": "application/json",
         ...(body && { "Content-Type": "application/json" }),
       },
     };
-
     const req = https.request(options, (res) => {
       let data = "";
-      res.on("data", (chunk) => (data += chunk));
+      res.on("data", (c) => (data += c));
       res.on("end", () => {
-        try {
-          resolve({ status: res.statusCode, data: JSON.parse(data || "{}") });
-        } catch {
-          resolve({ status: res.statusCode, data: {} });
-        }
+        try { resolve({ status: res.statusCode, data: JSON.parse(data || "{}"), headers: res.headers }); }
+        catch { resolve({ status: res.statusCode, data: {}, raw: data }); }
       });
     });
-
     req.on("error", reject);
     if (body) req.write(JSON.stringify(body));
     req.end();
   });
 }
 
-// ── Data Loaders ──
+function blobGet(id) {
+  return httpReq("GET", "jsonblob.com", `/api/jsonBlob/${id}`);
+}
+
+function blobPut(id, data) {
+  return httpReq("PUT", "jsonblob.com", `/api/jsonBlob/${id}`, data);
+}
+
+function blobCreate(data) {
+  return httpReq("POST", "jsonblob.com", "/api/jsonBlob", data);
+}
+
+// ── Local data ──
+
 function loadState() {
   try { return JSON.parse(fs.readFileSync(STATE_FILE, "utf8")); }
   catch { return null; }
@@ -90,593 +76,279 @@ function loadState() {
 
 function loadFriends() {
   try { return JSON.parse(fs.readFileSync(FRIENDS_FILE, "utf8")); }
-  catch { return { friends: [], pendingRequests: [], blocked: [] }; }
+  catch { return { friends: [] }; }
 }
 
-function saveFriends(data) {
-  fs.writeFileSync(FRIENDS_FILE, JSON.stringify(data, null, 2));
+function saveFriends(f) {
+  fs.writeFileSync(FRIENDS_FILE, JSON.stringify(f, null, 2));
 }
 
-function getCardGistId() {
-  try { return fs.readFileSync(CARD_ID_FILE, "utf8").trim(); }
+function getMyCode() {
+  try { return fs.readFileSync(MY_CODE_FILE, "utf8").trim(); }
   catch { return null; }
 }
 
-function saveCardGistId(id) {
-  fs.writeFileSync(CARD_ID_FILE, id);
+function saveMyCode(code) {
+  fs.writeFileSync(MY_CODE_FILE, code);
 }
 
-// ── Friend Code ──
-// Format: 3-letter species prefix + "-" + 4-char hex from username hash
-// Example: PXL-7A3F, CAT-B2E1, DRG-9F0C
+// ── Friend Code Generator ──
 
-function generateFriendCode(username, species) {
-  // Species prefix (3 chars)
-  const prefixMap = {
-    cat: "CAT", dog: "DOG", cactus: "PXL", dragon: "DRG", blob: "BLB",
-    bunny: "BNY", owl: "OWL", penguin: "PNG", turtle: "TRT", octopus: "OCT",
-    rabbit: "RBT", axolotl: "AXL", capybara: "CPY", ghost: "GHO",
-    robot: "BOT", mushroom: "MSH", snail: "SNL", goose: "GOS", chonk: "CHK",
-  };
-  const prefix = prefixMap[species] || "PET";
+function genCode(name, species) {
+  const pre = {
+    cat:"CAT",dog:"DOG",cactus:"PXL",dragon:"DRG",blob:"BLB",
+    bunny:"BNY",owl:"OWL",penguin:"PNG",turtle:"TRT",octopus:"OCT",
+    rabbit:"RBT",axolotl:"AXL",capybara:"CPY",ghost:"GHO",
+    robot:"BOT",mushroom:"MSH",snail:"SNL",goose:"GOS",chonk:"CHK",
+  }[species] || "PET";
 
-  // Hash username → 4 hex chars
-  let hash = 0;
-  for (let i = 0; i < username.length; i++) {
-    hash = ((hash << 5) - hash + username.charCodeAt(i)) | 0;
-  }
-  const hex = Math.abs(hash).toString(16).toUpperCase().slice(0, 4).padStart(4, "0");
-
-  return `${prefix}-${hex}`;
+  let h = 0;
+  const s = name + species + Date.now().toString(36);
+  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  return `${pre}-${Math.abs(h).toString(16).toUpperCase().slice(0,4).padStart(4,"0")}`;
 }
 
-function parseFriendCode(code) {
-  // Accept formats: PXL-7A3F, pxl-7a3f, PXL7A3F, @username
-  code = code.trim().toUpperCase();
-  if (code.startsWith("@")) return { type: "username", value: code.slice(1) };
-  code = code.replace(/[^A-Z0-9-]/g, "");
-  if (code.length === 7 && code[3] === "-") return { type: "code", value: code };
-  if (code.length === 7) return { type: "code", value: code.slice(0, 3) + "-" + code.slice(3) };
-  return { type: "unknown", value: code };
-}
+// ── Battle Stats ──
 
-// ── Registry (public Gist: maps friend codes to card Gist IDs) ──
-const REGISTRY_FILE = path.join(CLAUDE_DIR, "ai-pet-registry-gist-id");
-
-function getRegistryGistId() {
-  // Check local cache first
-  try { return fs.readFileSync(REGISTRY_FILE, "utf8").trim(); }
-  catch { return null; }
-}
-
-function saveRegistryGistId(id) {
-  fs.writeFileSync(REGISTRY_FILE, id);
-}
-
-async function loadRegistry() {
-  let regId = getRegistryGistId();
-
-  if (!regId) {
-    // Search for existing registry gist by description
-    const res = await ghApi("GET", `/gists?per_page=100`);
-    if (res.status === 200) {
-      const found = res.data.find(g => g.description?.includes("ai-pet-registry"));
-      if (found) {
-        regId = found.id;
-        saveRegistryGistId(regId);
-      }
-    }
-  }
-
-  if (regId) {
-    const res = await ghApi("GET", `/gists/${regId}`);
-    if (res.status === 200 && res.data.files?.["registry.json"]) {
-      try { return { id: regId, data: JSON.parse(res.data.files["registry.json"].content) }; }
-      catch { return { id: regId, data: { players: {} } }; }
-    }
-  }
-
-  return { id: null, data: { players: {} } };
-}
-
-async function saveRegistry(regId, registryData) {
-  const content = JSON.stringify(registryData, null, 2);
-
-  if (regId) {
-    await ghApi("PATCH", `/gists/${regId}`, {
-      files: { "registry.json": { content } },
-    });
-  } else {
-    // Create new registry gist
-    const res = await ghApi("POST", "/gists", {
-      description: "ai-pet-registry - Player friend code directory",
-      public: true,
-      files: { "registry.json": { content } },
-    });
-    if (res.status === 201) {
-      saveRegistryGistId(res.data.id);
-      return res.data.id;
-    }
-  }
-  return regId;
-}
-
-// ── Battle Stats Calculator ──
-function calcBattleStats(state) {
-  const bs = state.buddyStats || { debugging: 30, patience: 30, chaos: 30, wisdom: 30, snark: 30 };
+function battleStats(state) {
+  const b = state.buddyStats || { debugging:30, patience:30, chaos:30, wisdom:30, snark:30 };
   const lv = state.growth?.level || 1;
   const bond = state.nurture?.bond || 0;
-
   return {
-    atk: Math.round((bs.debugging + bs.snark) / 10),
-    def: Math.round((bs.patience + bs.wisdom) / 10),
-    spd: Math.round(bs.chaos / 5),
+    atk: Math.round((b.debugging + b.snark) / 10),
+    def: Math.round((b.patience + b.wisdom) / 10),
+    spd: Math.round(b.chaos / 5),
     hp: lv * 3 + Math.round(bond / 2),
   };
 }
 
-function buildCard(state, username) {
-  const code = generateFriendCode(username || "unknown", state.buddySpecies || "cat");
+function buildCard(state) {
   return {
-    version: "1.0",
-    owner: username || null,
-    friendCode: code,
-    pet: {
-      name: state.buddyName,
-      species: state.buddySpecies,
-      level: state.growth?.level || 1,
-      evolutionStage: state.growth?.evolutionStage || "baby",
-      rarity: state.buddyRarity || "common",
-    },
-    battleStats: calcBattleStats(state),
-    record: state.battleRecord || { wins: 0, losses: 0, draws: 0 },
-    achievements: (state.achievements || []).map((a) => a.id),
-    signature: state.personality?.catchphrase || "",
-    lastUpdated: new Date().toISOString(),
+    pet: { name: state.buddyName, species: state.buddySpecies, level: state.growth?.level || 1, rarity: state.buddyRarity || "common" },
+    stats: battleStats(state),
+    record: state.battleRecord || { w: 0, l: 0, d: 0 },
+    sig: state.personality?.catchphrase || "",
+    t: Date.now(),
   };
 }
 
-// ── Simulate Battle ──
-function simulateBattle(cardA, cardB) {
-  const a = { ...cardA.battleStats, hp: cardA.battleStats.hp, name: cardA.pet.name };
-  const b = { ...cardB.battleStats, hp: cardB.battleStats.hp, name: cardB.pet.name };
-  const log = [];
+// ── Battle Simulator ──
 
-  // Determine first attacker
-  let first = a, second = b;
-  if (b.spd > a.spd) { first = b; second = a; }
-  else if (b.spd === a.spd && Math.random() > 0.5) { first = b; second = a; }
+function fight(a, b) {
+  const fa = { ...a.stats, hp: a.stats.hp, n: a.pet.name };
+  const fb = { ...b.stats, hp: b.stats.hp, n: b.pet.name };
+  let f = fa.spd >= fb.spd ? [fa, fb] : [fb, fa];
+  const log = [`⚔️ ${a.pet.name} (Lv.${a.pet.level}) VS ${b.pet.name} (Lv.${b.pet.level})`, `${f[0].n} goes first!`, ""];
+  let [hp0, hp1] = [f[0].hp, f[1].hp];
 
-  log.push(`⚔️ ${cardA.pet.name} (Lv.${cardA.pet.level}) VS ${cardB.pet.name} (Lv.${cardB.pet.level})`);
-  log.push(`${first.name} goes first! (SPD: ${first.spd})`);
-  log.push("");
-
-  let round = 0;
-  let firstHp = first.hp, secondHp = second.hp;
-
-  while (firstHp > 0 && secondHp > 0 && round < 20) {
-    round++;
-
-    // First attacks second
-    const dmg1 = Math.max(1, first.atk - second.def + Math.floor(Math.random() * 3));
-    secondHp -= dmg1;
-    log.push(`Round ${round}: ${first.name} attacks! ${dmg1} damage → ${second.name} HP: ${Math.max(0, secondHp)}/${second.hp}`);
-
-    if (secondHp <= 0) break;
-
-    // Second attacks first
-    const dmg2 = Math.max(1, second.atk - first.def + Math.floor(Math.random() * 3));
-    firstHp -= dmg2;
-    log.push(`          ${second.name} attacks! ${dmg2} damage → ${first.name} HP: ${Math.max(0, firstHp)}/${first.hp}`);
+  for (let r = 1; r <= 20 && hp0 > 0 && hp1 > 0; r++) {
+    const d0 = Math.max(1, f[0].atk - f[1].def + (Math.random() * 3 | 0));
+    hp1 -= d0;
+    log.push(`R${r}: ${f[0].n} → ${d0} dmg → ${f[1].n} HP:${Math.max(0,hp1)}/${f[1].hp}`);
+    if (hp1 <= 0) break;
+    const d1 = Math.max(1, f[1].atk - f[0].def + (Math.random() * 3 | 0));
+    hp0 -= d1;
+    log.push(`    ${f[1].n} → ${d1} dmg → ${f[0].n} HP:${Math.max(0,hp0)}/${f[0].hp}`);
   }
 
   log.push("");
-
-  let winner, loser;
-  if (secondHp <= 0) {
-    winner = first.name; loser = second.name;
-    log.push(`🏆 ${first.name} WINS!`);
-  } else if (firstHp <= 0) {
-    winner = second.name; loser = first.name;
-    log.push(`🏆 ${second.name} WINS!`);
-  } else {
-    winner = null;
-    log.push(`⏰ DRAW! (20 rounds limit)`);
-  }
-
-  return { winner, loser, rounds: round, log, firstHp, secondHp };
+  const winner = hp1 <= 0 ? f[0].n : hp0 <= 0 ? f[1].n : null;
+  log.push(winner ? `🏆 ${winner} WINS!` : "⏰ DRAW!");
+  return { winner, log };
 }
 
 // ══════════════════════════════════════
 //  COMMANDS
 // ══════════════════════════════════════
 
-async function cardPublish() {
+async function cmdCard() {
   const state = loadState();
-  if (!state) { console.log('{"error": "No pet state. Run /pet first."}'); return; }
+  if (!state) { out({ error: "No pet. Run /pet first." }); return; }
 
-  const me = await ghApi("GET", "/user");
-  if (me.status !== 200) { console.log('{"error": "GitHub auth failed. Set GITHUB_TOKEN."}'); return; }
+  let code = getMyCode();
+  const card = buildCard(state);
 
-  const card = buildCard(state, me.data.login);
-  const friendCode = card.friendCode;
-  const content = JSON.stringify(card, null, 2);
-  const existingId = getCardGistId();
+  // Load registry
+  const reg = (await blobGet(REGISTRY_BLOB)).data;
+  if (!reg.players) reg.players = {};
 
-  let gistId, gistUrl;
-
-  if (existingId) {
-    const res = await ghApi("PATCH", `/gists/${existingId}`, {
-      files: { "ai-pet-card.json": { content } },
-    });
-    gistId = existingId;
-    gistUrl = res.data?.html_url;
+  if (code && reg.players[code]) {
+    // Update existing
+    reg.players[code] = { ...card, code };
   } else {
-    const res = await ghApi("POST", "/gists", {
-      description: `AI Pet Card - ${card.pet.name} the ${card.pet.species} [${friendCode}]`,
-      public: true,
-      files: { "ai-pet-card.json": { content } },
-    });
-    if (res.status === 201) {
-      gistId = res.data.id;
-      gistUrl = res.data.html_url;
-      saveCardGistId(gistId);
-    } else {
-      console.log(JSON.stringify({ error: "Failed to create gist", status: res.status }));
-      return;
-    }
+    // New player
+    code = genCode(state.buddyName || "pet", state.buddySpecies || "cat");
+    // Avoid collision
+    while (reg.players[code]) code = genCode(code + Math.random(), state.buddySpecies || "cat");
+    reg.players[code] = { ...card, code };
+    saveMyCode(code);
   }
 
-  // Register friend code in public registry
-  const reg = await loadRegistry();
-  reg.data.players = reg.data.players || {};
-  reg.data.players[friendCode] = {
-    github: me.data.login,
-    gistId,
-    pet: card.pet.name,
-    species: card.pet.species,
-    level: card.pet.level,
-    updatedAt: new Date().toISOString(),
-  };
-  await saveRegistry(reg.id, reg.data);
+  reg.totalPlayers = Object.keys(reg.players).length;
+  await blobPut(REGISTRY_BLOB, reg);
 
-  console.log(JSON.stringify({
+  out({
     ok: true,
-    friendCode,
-    gistId,
-    url: gistUrl,
-    shareText: `Add me on AI Pet! My code: ${friendCode}  →  /pet friend ${friendCode}`,
-  }));
-}
-
-async function cardView(codeOrUser) {
-  const parsed = parseFriendCode(codeOrUser);
-  let gistId;
-
-  if (parsed.type === "code") {
-    // Look up in registry
-    const reg = await loadRegistry();
-    const player = reg.data.players?.[parsed.value];
-    if (!player) { console.log(JSON.stringify({ error: "Friend code not found", code: parsed.value })); return; }
-    gistId = player.gistId;
-  } else {
-    // Username lookup - search their gists
-    const res = await ghApi("GET", `/users/${parsed.value}/gists?per_page=100`);
-    if (res.status !== 200) { console.log(JSON.stringify({ error: "User not found" })); return; }
-    const gist = res.data.find((g) => g.files?.["ai-pet-card.json"]);
-    if (!gist) { console.log(JSON.stringify({ error: "No pet card found" })); return; }
-    gistId = gist.id;
-  }
-
-  const full = await ghApi("GET", `/gists/${gistId}`);
-  try {
-    const card = JSON.parse(full.data.files["ai-pet-card.json"].content);
-    console.log(JSON.stringify({ ok: true, gistId, card }));
-  } catch {
-    console.log(JSON.stringify({ error: "Failed to parse pet card" }));
-  }
-}
-
-async function friendAdd(codeOrUser) {
-  const parsed = parseFriendCode(codeOrUser);
-  let github, gistId, friendCode;
-
-  if (parsed.type === "code") {
-    // Look up friend code in registry
-    const reg = await loadRegistry();
-    const player = reg.data.players?.[parsed.value];
-    if (!player) {
-      console.log(JSON.stringify({ error: "Friend code not found. Ask them to run /pet card first.", code: parsed.value }));
-      return;
-    }
-    github = player.github;
-    gistId = player.gistId;
-    friendCode = parsed.value;
-  } else {
-    // Username: search their gists
-    github = parsed.value;
-    const res = await ghApi("GET", `/users/${github}/gists?per_page=100`);
-    if (res.status !== 200) { console.log(JSON.stringify({ error: "User not found" })); return; }
-    const gist = res.data.find((g) => g.files?.["ai-pet-card.json"]);
-    if (!gist) { console.log(JSON.stringify({ error: "No pet card. They need /pet card first." })); return; }
-    gistId = gist.id;
-    friendCode = codeOrUser;
-  }
-
-  const friends = loadFriends();
-  if (friends.friends.find((f) => f.github === github)) {
-    console.log(JSON.stringify({ error: "Already friends", github }));
-    return;
-  }
-
-  // Fetch card for display
-  let cardPreview = null;
-  try {
-    const full = await ghApi("GET", `/gists/${gistId}`);
-    if (full.status === 200) cardPreview = JSON.parse(full.data.files["ai-pet-card.json"].content);
-  } catch {}
-
-  friends.friends.push({
-    github,
-    gistId,
-    friendCode,
-    addedAt: new Date().toISOString(),
+    friendCode: code,
+    shareText: `Add me on AI Pet! Code: ${code}\n→ /pet friend ${code}`,
+    card,
   });
-  saveFriends(friends);
-
-  console.log(JSON.stringify({
-    ok: true,
-    added: github,
-    friendCode,
-    pet: cardPreview?.pet || null,
-    battleStats: cardPreview?.battleStats || null,
-  }));
 }
 
-async function friendList() {
+async function cmdView(code) {
+  code = code.toUpperCase().trim();
+  const reg = (await blobGet(REGISTRY_BLOB)).data;
+  const player = reg.players?.[code];
+  if (!player) { out({ error: "Code not found", code }); return; }
+  out({ ok: true, code, ...player });
+}
+
+async function cmdFriend(code) {
+  code = code.toUpperCase().trim();
+  const reg = (await blobGet(REGISTRY_BLOB)).data;
+  const player = reg.players?.[code];
+  if (!player) { out({ error: "Code not found. Ask them to run /pet card first.", code }); return; }
+
   const friends = loadFriends();
-  if (friends.friends.length === 0) {
-    console.log(JSON.stringify({ friends: [], message: "No friends yet. Use /pet friend add @username" }));
-    return;
-  }
+  if (friends.friends.find(f => f.code === code)) { out({ error: "Already friends", code }); return; }
 
-  const results = [];
-  for (const f of friends.friends) {
-    try {
-      const full = await ghApi("GET", `/gists/${f.gistId}`);
-      if (full.status === 200 && full.data.files?.["ai-pet-card.json"]) {
-        const card = JSON.parse(full.data.files["ai-pet-card.json"].content);
-        results.push({ github: f.github, card });
-      } else {
-        results.push({ github: f.github, card: null, error: "Card unavailable" });
-      }
-    } catch {
-      results.push({ github: f.github, card: null, error: "Fetch failed" });
-    }
-  }
-  console.log(JSON.stringify({ friends: results }));
-}
-
-async function friendRemove(username) {
-  const friends = loadFriends();
-  friends.friends = friends.friends.filter((f) => f.github !== username);
+  friends.friends.push({ code, pet: player.pet, addedAt: new Date().toISOString() });
   saveFriends(friends);
-  console.log(JSON.stringify({ ok: true, removed: username }));
+  out({ ok: true, added: code, pet: player.pet, stats: player.stats });
 }
 
-async function battleCreate(username) {
+async function cmdFriends() {
+  const friends = loadFriends();
+  if (!friends.friends.length) { out({ friends: [], msg: "No friends yet. Use: /pet friend <CODE>" }); return; }
+
+  // Fetch latest data for each friend
+  const reg = (await blobGet(REGISTRY_BLOB)).data;
+  const list = friends.friends.map(f => {
+    const live = reg.players?.[f.code];
+    return live ? { code: f.code, ...live } : { code: f.code, pet: f.pet, offline: true };
+  });
+  out({ friends: list });
+}
+
+async function cmdUnfriend(code) {
+  code = code.toUpperCase().trim();
+  const friends = loadFriends();
+  friends.friends = friends.friends.filter(f => f.code !== code);
+  saveFriends(friends);
+  out({ ok: true, removed: code });
+}
+
+async function cmdBattle(oppCode) {
+  oppCode = oppCode.toUpperCase().trim();
   const state = loadState();
-  if (!state) { console.log('{"error": "No pet state"}'); return; }
+  if (!state) { out({ error: "No pet" }); return; }
 
-  // Get opponent's card
-  const oppRes = await ghApi("GET", `/users/${username}/gists?per_page=100`);
-  const oppGist = oppRes.data?.find((g) => g.files?.["ai-pet-card.json"]);
-  if (!oppGist) { console.log(JSON.stringify({ error: "Opponent has no pet card" })); return; }
+  const myCode = getMyCode();
+  if (!myCode) { out({ error: "Run /pet card first to get your friend code" }); return; }
 
-  const oppFull = await ghApi("GET", `/gists/${oppGist.id}`);
-  const oppCard = JSON.parse(oppFull.data.files["ai-pet-card.json"].content);
+  const reg = (await blobGet(REGISTRY_BLOB)).data;
+  const opp = reg.players?.[oppCode];
+  if (!opp) { out({ error: "Opponent not found", code: oppCode }); return; }
 
-  // Build own card
-  const me = await ghApi("GET", "/user");
   const myCard = buildCard(state);
-  myCard.owner = me.data.login;
+  const result = fight(myCard, { pet: opp.pet, stats: opp.stats });
 
-  // Create issue
-  const battleData = {
-    challenger: myCard,
-    opponent: oppCard,
-    status: "pending",
-    createdAt: new Date().toISOString(),
-  };
+  // Update records in registry
+  const isWin = result.winner === myCard.pet.name;
+  const isDraw = !result.winner;
 
-  const res = await ghApi("POST", `/repos/${BATTLE_REPO}/issues`, {
-    title: `[BATTLE] ${myCard.pet.name} vs ${oppCard.pet.name} | ${new Date().toISOString().split("T")[0]}`,
-    body: "```json\n" + JSON.stringify(battleData, null, 2) + "\n```\n\n⚔️ Waiting for opponent to accept...",
-    labels: ["battle", "pending"],
-  });
+  // Update my record
+  if (!state.battleRecord) state.battleRecord = { w: 0, l: 0, d: 0 };
+  if (isWin) { state.battleRecord.w++; state.growth.xp += 30; state.inventory.gold += 20; }
+  else if (isDraw) { state.battleRecord.d++; state.growth.xp += 15; }
+  else { state.battleRecord.l++; state.growth.xp += 10; state.inventory.gold += 5; }
+  fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
 
-  if (res.status === 201) {
-    console.log(JSON.stringify({
-      ok: true,
-      issueNumber: res.data.number,
-      url: res.data.html_url,
-      challenger: myCard.pet.name,
-      opponent: oppCard.pet.name,
-      myStats: myCard.battleStats,
-      oppStats: oppCard.battleStats,
-    }));
-  } else {
-    console.log(JSON.stringify({ error: "Failed to create battle", status: res.status, msg: res.data.message }));
+  // Update registry records
+  if (reg.players[myCode]) {
+    reg.players[myCode].record = state.battleRecord;
+    reg.players[myCode] = { ...buildCard(state), code: myCode };
   }
-}
-
-async function battleCheck() {
-  const me = await ghApi("GET", "/user");
-  if (me.status !== 200) { console.log('{"error": "Auth failed"}'); return; }
-
-  const res = await ghApi("GET", `/repos/${BATTLE_REPO}/issues?labels=battle,pending&state=open&per_page=20`);
-  if (res.status !== 200) { console.log(JSON.stringify({ error: "Failed to fetch battles" })); return; }
-
-  const challenges = res.data.filter((issue) => {
-    try {
-      const json = issue.body.match(/```json\n([\s\S]*?)\n```/)?.[1];
-      if (!json) return false;
-      const data = JSON.parse(json);
-      return data.opponent?.owner === me.data.login && data.status === "pending";
-    } catch { return false; }
-  }).map((issue) => {
-    const json = issue.body.match(/```json\n([\s\S]*?)\n```/)?.[1];
-    const data = JSON.parse(json);
-    return {
-      issueNumber: issue.number,
-      challenger: data.challenger.pet.name,
-      challengerStats: data.challenger.battleStats,
-      url: issue.html_url,
-    };
-  });
-
-  console.log(JSON.stringify({ pending: challenges, count: challenges.length }));
-}
-
-async function battleAccept(issueNumber) {
-  // Fetch the issue
-  const res = await ghApi("GET", `/repos/${BATTLE_REPO}/issues/${issueNumber}`);
-  if (res.status !== 200) { console.log(JSON.stringify({ error: "Battle not found" })); return; }
-
-  const json = res.data.body.match(/```json\n([\s\S]*?)\n```/)?.[1];
-  if (!json) { console.log(JSON.stringify({ error: "Invalid battle data" })); return; }
-
-  const battleData = JSON.parse(json);
-
-  // Update opponent card with latest stats
-  const state = loadState();
-  if (state) {
-    const me = await ghApi("GET", "/user");
-    battleData.opponent = buildCard(state);
-    battleData.opponent.owner = me.data.login;
+  if (reg.players[oppCode]) {
+    if (!reg.players[oppCode].record) reg.players[oppCode].record = { w: 0, l: 0, d: 0 };
+    if (isWin) reg.players[oppCode].record.l++;
+    else if (!isDraw) reg.players[oppCode].record.w++;
+    else reg.players[oppCode].record.d++;
   }
+  await blobPut(REGISTRY_BLOB, reg);
 
-  // Simulate battle
-  const result = simulateBattle(battleData.challenger, battleData.opponent);
-
-  // Post result as comment
-  const commentBody = "## ⚔️ Battle Result\n\n```\n" + result.log.join("\n") + "\n```\n\n" +
-    `**Winner:** ${result.winner || "DRAW"} (${result.rounds} rounds)`;
-
-  await ghApi("POST", `/repos/${BATTLE_REPO}/issues/${issueNumber}/comments`, {
-    body: commentBody,
-  });
-
-  // Update labels
-  await ghApi("PATCH", `/repos/${BATTLE_REPO}/issues/${issueNumber}`, {
-    labels: ["battle", "finished"],
-    state: "closed",
-  });
-
-  // Update local state with result
-  if (state) {
-    if (!state.battleRecord) state.battleRecord = { wins: 0, losses: 0, draws: 0 };
-    const myName = battleData.opponent.pet.name;
-    if (result.winner === myName) {
-      state.battleRecord.wins++;
-      state.growth.xp = (state.growth.xp || 0) + 30;
-      state.inventory.gold = (state.inventory.gold || 0) + 20;
-    } else if (result.winner) {
-      state.battleRecord.losses++;
-      state.growth.xp = (state.growth.xp || 0) + 10;
-      state.inventory.gold = (state.inventory.gold || 0) + 5;
-    } else {
-      state.battleRecord.draws++;
-      state.growth.xp = (state.growth.xp || 0) + 15;
-    }
-    fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
-  }
-
-  console.log(JSON.stringify({
-    ok: true,
-    issueNumber,
-    result: { winner: result.winner, rounds: result.rounds },
+  // Save battle to local history
+  const hist = loadBattleHistory();
+  hist.push({
+    vs: oppCode,
+    oppPet: opp.pet.name,
+    result: isWin ? "win" : isDraw ? "draw" : "loss",
+    date: new Date().toISOString(),
     log: result.log,
-  }));
-}
-
-async function battleResult(issueNumber) {
-  const res = await ghApi("GET", `/repos/${BATTLE_REPO}/issues/${issueNumber}/comments`);
-  if (res.status !== 200) { console.log(JSON.stringify({ error: "Battle not found" })); return; }
-
-  const resultComment = res.data.find((c) => c.body.includes("Battle Result"));
-  if (resultComment) {
-    console.log(JSON.stringify({ ok: true, issueNumber, body: resultComment.body }));
-  } else {
-    console.log(JSON.stringify({ error: "No result yet", issueNumber }));
-  }
-}
-
-async function rank() {
-  const friends = loadFriends();
-  const state = loadState();
-  const rankings = [];
-
-  // Add self
-  if (state) {
-    const me = await ghApi("GET", "/user");
-    const card = buildCard(state);
-    card.owner = me.data?.login || "me";
-    rankings.push(card);
-  }
-
-  // Add friends
-  for (const f of friends.friends) {
-    try {
-      const full = await ghApi("GET", `/gists/${f.gistId}`);
-      if (full.status === 200 && full.data.files?.["ai-pet-card.json"]) {
-        rankings.push(JSON.parse(full.data.files["ai-pet-card.json"].content));
-      }
-    } catch {}
-  }
-
-  // Sort by level then wins
-  rankings.sort((a, b) => {
-    const aScore = (a.pet?.level || 0) * 100 + (a.record?.wins || 0) * 10;
-    const bScore = (b.pet?.level || 0) * 100 + (b.record?.wins || 0) * 10;
-    return bScore - aScore;
   });
+  saveBattleHistory(hist.slice(-20)); // keep last 20
 
-  console.log(JSON.stringify({ leaderboard: rankings }));
+  out({
+    ok: true,
+    result: isWin ? "WIN" : isDraw ? "DRAW" : "LOSS",
+    reward: isWin ? "+30 XP, +20 Gold" : isDraw ? "+15 XP" : "+10 XP, +5 Gold",
+    log: result.log,
+  });
 }
 
-// ══════════════════════════════════════
-//  MAIN
-// ══════════════════════════════════════
-const [, , cmd, ...args] = process.argv;
+function loadBattleHistory() {
+  try { return JSON.parse(fs.readFileSync(path.join(CLAUDE_DIR, "ai-pet-battles.json"), "utf8")); }
+  catch { return []; }
+}
+function saveBattleHistory(h) {
+  fs.writeFileSync(path.join(CLAUDE_DIR, "ai-pet-battles.json"), JSON.stringify(h, null, 2));
+}
 
-const commands = {
-  "card-publish": () => cardPublish(),
-  "card-view": () => cardView(args[0]),
-  "friend-add": () => friendAdd(args[0]),
-  "friend-list": () => friendList(),
-  "friend-remove": () => friendRemove(args[0]),
-  "battle-create": () => battleCreate(args[0]),
-  "battle-check": () => battleCheck(),
-  "battle-accept": () => battleAccept(args[0]),
-  "battle-result": () => battleResult(args[0]),
-  "rank": () => rank(),
+async function cmdBattles() {
+  const hist = loadBattleHistory();
+  out({ battles: hist.slice(-10), total: hist.length });
+}
+
+async function cmdRank() {
+  const reg = (await blobGet(REGISTRY_BLOB)).data;
+  const players = Object.entries(reg.players || {})
+    .map(([code, p]) => ({ code, ...p }))
+    .sort((a, b) => {
+      const sa = (a.pet?.level || 0) * 100 + (a.record?.w || 0) * 10;
+      const sb = (b.pet?.level || 0) * 100 + (b.record?.w || 0) * 10;
+      return sb - sa;
+    })
+    .slice(0, 20);
+  out({ leaderboard: players, totalPlayers: reg.totalPlayers || players.length });
+}
+
+// ── Output ──
+function out(obj) { console.log(JSON.stringify(obj, null, 2)); }
+
+// ── Main ──
+const [,, cmd, ...args] = process.argv;
+const cmds = {
+  card: cmdCard,
+  view: () => cmdView(args[0]),
+  friend: () => cmdFriend(args[0]),
+  friends: cmdFriends,
+  unfriend: () => cmdUnfriend(args[0]),
+  battle: () => cmdBattle(args[0]),
+  battles: cmdBattles,
+  rank: cmdRank,
 };
 
-if (commands[cmd]) {
-  commands[cmd]().catch((e) => console.log(JSON.stringify({ error: e.message })));
+if (cmds[cmd]) {
+  cmds[cmd]().catch(e => out({ error: e.message }));
 } else {
-  console.log("AI Pet Social - GitHub-Powered Multiplayer");
-  console.log("");
-  console.log("Commands:");
-  console.log("  card-publish         Publish your pet card (public Gist)");
-  console.log("  card-view <user>     View someone's pet card");
-  console.log("  friend-add <user>    Add friend by GitHub username");
-  console.log("  friend-list          List friends and their pets");
-  console.log("  friend-remove <user> Remove friend");
-  console.log("  battle-create <user> Challenge a friend");
-  console.log("  battle-check         Check pending challenges");
-  console.log("  battle-accept <id>   Accept a battle challenge");
-  console.log("  battle-result <id>   View battle result");
-  console.log("  rank                 Friend leaderboard");
+  console.log(`AI Pet Social - Zero Auth Multiplayer
+
+  card              Get your friend code & publish card
+  view <CODE>       View someone's pet (e.g. view PXL-7A3F)
+  friend <CODE>     Add friend
+  friends           List friends
+  unfriend <CODE>   Remove friend
+  battle <CODE>     Battle a friend!
+  battles           Battle history
+  rank              Global leaderboard`);
 }
