@@ -190,7 +190,7 @@ First-time setup: `/pet card` will guide you through creating a GitHub token (2 
 
 ## Install
 
-### Core Plugin (30 seconds, zero dependencies)
+### First Install (30 seconds, zero dependencies)
 
 ```bash
 git clone https://github.com/qianhua76123-pixel/claude-code-buddy.git
@@ -198,12 +198,27 @@ cd claude-code-buddy
 bash install.sh
 ```
 
-Installs 3 Skills + StatusLine + Hooks. No npm, no Node modules, nothing extra. Restart Claude Code, then:
+### Update to Latest Version
+
+```bash
+cd claude-code-buddy
+git pull
+bash install.sh
+```
+
+That's it. `install.sh` copies all files to `~/.claude/` and updates your settings. No token, no npm, no dependencies.
+
+Restart Claude Code after install/update, then:
 
 ```
 /pet              # Hatch your pet
 /pet quest        # Daily quests
 /pet adventure    # Dungeon crawl
+/pet home         # Build your home
+/pet card         # Get friend code (auto, zero setup)
+/pet friend CODE  # Add friend
+/pet battle CODE  # Fight!
+/pet visit CODE   # Visit friend's home
 /pet-pixel        # Pixel art pattern
 ```
 
